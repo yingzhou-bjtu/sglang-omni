@@ -270,6 +270,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             ],
             health: AtomicHealth::unknown(),
             immediate_probe: Notify::new(),

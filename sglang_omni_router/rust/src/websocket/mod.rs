@@ -888,13 +888,14 @@ fn classify_speech(
             }
         }
     };
-    speech_requirement(fields, model, trust)
+    speech_requirement(fields, model, trust, pool.voice_state_enabled())
 }
 
 fn speech_requirement(
     fields: SpeechFields,
     model: ModelSelection,
     trust: &TrustDomain,
+    voice_state_enabled: bool,
 ) -> Result<RouteRequirement, ()> {
     let format = classify_response_format(
         fields
@@ -926,7 +927,7 @@ fn speech_requirement(
     )
     .ok_or(())?;
     let references = reference_forms(&fields);
-    let managed_voice = classify_managed_voice(&fields, &references);
+    let managed_voice = voice_state_enabled && classify_managed_voice(&fields, &references);
     Ok(RouteRequirement::new(
         ProfileRequirement::SpeechWebsocket {
             model,
@@ -1333,6 +1334,7 @@ mod tests {
             fields,
             ModelSelection::Explicit(String::from("tts")),
             &TrustDomain::new(String::from("local")),
+            true,
         )
         .expect("valid speech requirement");
         let ProfileRequirement::SpeechWebsocket {
@@ -1373,6 +1375,7 @@ mod tests {
                 encoded_stream,
                 ModelSelection::Explicit(String::from("tts")),
                 &TrustDomain::new(String::from("local")),
+                true,
             )
             .is_err()
         );
@@ -1388,6 +1391,7 @@ mod tests {
             fields,
             ModelSelection::Explicit(String::from("tts")),
             &TrustDomain::new(String::from("local")),
+            true,
         )
         .expect("valid speech requirement");
         let ProfileRequirement::SpeechWebsocket {
@@ -1397,6 +1401,27 @@ mod tests {
             panic!("speech websocket requirement")
         };
         assert_eq!(reference_forms, &[ReferenceForm::List]);
+    }
+
+    #[test]
+    fn named_speech_affinity_depends_on_voice_state_enablement() {
+        for (enabled, expected) in [(false, false), (true, true)] {
+            let fields =
+                parse_speech_config(br#"{"type":"session.config","model":"tts","voice":"named"}"#)
+                    .expect("valid named voice configuration");
+            let requirement = speech_requirement(
+                fields,
+                ModelSelection::Explicit(String::from("tts")),
+                &TrustDomain::new(String::from("local")),
+                enabled,
+            )
+            .expect("valid speech requirement");
+            let ProfileRequirement::SpeechWebsocket { managed_voice, .. } = requirement.profile()
+            else {
+                panic!("speech websocket requirement")
+            };
+            assert_eq!(*managed_voice, expected);
+        }
     }
 
     #[test]
