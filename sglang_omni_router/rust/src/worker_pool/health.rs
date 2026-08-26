@@ -247,7 +247,7 @@ mod tests {
     fn test_record(ordinal: usize, address: SocketAddr) -> Arc<WorkerRecord> {
         Arc::new(WorkerRecord {
             worker_id: WorkerId::new(format!("worker-{ordinal}")),
-            default_model_id: String::from("omni"),
+            default_model_id: Some(String::from("omni")),
             registration_id: RegistrationId::from_startup_ordinal(ordinal),
             target: test_target(address),
             trust_domain: TrustDomain::new(String::from("local")),
@@ -260,10 +260,15 @@ mod tests {
                 chat_audio_formats: Vec::new(),
                 stream_modes: vec![StreamMode::NonStreaming],
             }],
-            capacity: CapacitySlot {
-                limit: 1,
-                semaphore: Arc::new(Semaphore::new(1)),
-            },
+            capacity: [
+                Some(CapacitySlot {
+                    limit: 1,
+                    semaphore: Arc::new(Semaphore::new(1)),
+                }),
+                None,
+                None,
+                None,
+            ],
             health: AtomicHealth::unknown(),
             immediate_probe: Notify::new(),
         })
