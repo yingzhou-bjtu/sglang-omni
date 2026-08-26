@@ -36,6 +36,50 @@ struct CapacitySlot {
     semaphore: Arc<Semaphore>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct CapacitySnapshot {
+    pub(crate) class: CapacityClass,
+    pub(crate) limit: usize,
+    pub(crate) in_flight: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum AdmissionClass {
+    Global,
+    Capacity(CapacityClass),
+}
+
+impl AdmissionClass {
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::Global => "global",
+            Self::Capacity(class) => class.label(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct AdmissionSnapshot {
+    pub(crate) class: AdmissionClass,
+    pub(crate) limit: usize,
+    pub(crate) in_flight: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct WorkerSnapshot {
+    pub(crate) worker_id: String,
+    pub(crate) registration_ordinal: usize,
+    pub(crate) health: WorkerHealth,
+    pub(crate) routable: bool,
+    pub(crate) capacity: Vec<CapacitySnapshot>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct OperationsSnapshot {
+    pub(crate) admission: [AdmissionSnapshot; CAPACITY_CLASS_COUNT + 1],
+    pub(crate) workers: Vec<WorkerSnapshot>,
+}
+
 /// One static startup registration with independently updated health and
 /// exact route-capacity ownership.
 pub(super) struct WorkerRecord {
@@ -530,6 +574,46 @@ impl WorkerPool {
                     && cohort.task == route.speech_to_text_task()
             })
             .map(|cohort| ContentBlindMediaHttp { pool: self, cohort })
+    }
+
+    pub(crate) fn operations_snapshot(
+        &self,
+    ) -> Result<OperationsSnapshot, crate::error::RouterError> {
+        let gate = self
+            .gate
+            .read()
+            .map_err(|_| crate::error::RouterError::WorkerPoolInvariant)?;
+        let raw_admission = self.admission.snapshot();
+        let admission = std::array::from_fn(|index| AdmissionSnapshot {
+            class: if index == 0 {
+                AdmissionClass::Global
+            } else {
+                AdmissionClass::Capacity(CapacityClass::ALL[index - 1])
+            },
+            limit: raw_admission[index].0,
+            in_flight: raw_admission[index].1,
+        });
+        let workers = self
+            .records
+            .iter()
+            .map(|record| WorkerSnapshot {
+                worker_id: record.worker_id.as_str().to_owned(),
+                registration_ordinal: record.registration_id.startup_ordinal(),
+                health: record.health.load(),
+                routable: gate.accepting && record.is_routable(),
+                capacity: CapacityClass::ALL
+                    .into_iter()
+                    .filter_map(|class| {
+                        record.slot(class).map(|slot| CapacitySnapshot {
+                            class,
+                            limit: slot.limit,
+                            in_flight: slot.limit - slot.semaphore.available_permits(),
+                        })
+                    })
+                    .collect(),
+            })
+            .collect();
+        Ok(OperationsSnapshot { admission, workers })
     }
 
     pub(crate) fn generation_http_ready(&self, trust: &TrustDomain) -> bool {
@@ -1224,6 +1308,63 @@ mod tests {
                 .available_permits(),
             1
         );
+    }
+
+    #[test]
+    fn operations_snapshot_reads_exact_permits_and_releases_with_the_lease() {
+        let pool = pool(
+            RoutingStrategy::RoundRobin,
+            vec![record(0, "local", "omni", 3)],
+            4,
+        );
+        let initial = pool
+            .operations_snapshot()
+            .expect("initial operations snapshot");
+        assert_eq!(initial.admission[0].class, AdmissionClass::Global);
+        assert_eq!(initial.admission[0].limit, 4);
+        assert_eq!(initial.admission[0].in_flight, 0);
+        assert_eq!(
+            initial.admission[1].class,
+            AdmissionClass::Capacity(CapacityClass::GenerationHttp)
+        );
+        assert_eq!(initial.admission[1].limit, 4);
+        assert_eq!(initial.admission[2].limit, 0);
+        assert_eq!(initial.workers[0].worker_id, "worker-0");
+        assert_eq!(initial.workers[0].registration_ordinal, 0);
+        assert_eq!(initial.workers[0].health, WorkerHealth::Healthy);
+        assert!(initial.workers[0].routable);
+        assert_eq!(initial.workers[0].capacity[0].limit, 3);
+        assert_eq!(initial.workers[0].capacity[0].in_flight, 0);
+
+        let lease = pool
+            .dispatch(
+                pool.try_admit(CapacityClass::GenerationHttp, 1)
+                    .expect("snapshot admission"),
+                &requirement("omni", "local"),
+            )
+            .expect("snapshot dispatch");
+        let occupied = pool
+            .operations_snapshot()
+            .expect("occupied operations snapshot");
+        assert_eq!(occupied.admission[0].in_flight, 1);
+        assert_eq!(occupied.admission[1].in_flight, 1);
+        assert_eq!(occupied.workers[0].capacity[0].in_flight, 1);
+
+        drop(lease);
+        let released = pool
+            .operations_snapshot()
+            .expect("released operations snapshot");
+        assert_eq!(released.admission[0].in_flight, 0);
+        assert_eq!(released.admission[1].in_flight, 0);
+        assert_eq!(released.workers[0].capacity[0].in_flight, 0);
+
+        pool.records[0].health.store(WorkerHealth::Unhealthy);
+        pool.drain().expect("drain snapshot fixture");
+        let drained = pool
+            .operations_snapshot()
+            .expect("drained operations snapshot");
+        assert_eq!(drained.workers[0].health, WorkerHealth::Unhealthy);
+        assert!(!drained.workers[0].routable);
     }
 
     #[test]
