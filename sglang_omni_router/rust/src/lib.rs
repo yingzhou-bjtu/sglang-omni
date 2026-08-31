@@ -12,6 +12,7 @@ mod lifecycle;
 mod request_id;
 mod server;
 mod shutdown;
+mod speech_facts;
 mod worker_pool;
 
 use std::path::Path;
