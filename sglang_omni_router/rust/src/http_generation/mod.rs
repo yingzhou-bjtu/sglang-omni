@@ -172,15 +172,8 @@ async fn send_once(
             return Err(fault);
         }
     };
-    if let Some(state) = outgoing.upload.as_ref() {
-        match snapshot_upload(state)? {
-            UploadState::Complete => {}
-            UploadState::Failed(fault) => return Err(fault),
-            UploadState::Incomplete => {
-                lease.request_immediate_probe();
-                return Err(HttpFault::UpstreamProtocolError);
-            }
-        }
+    if let Some(fault) = failed_upload(&outgoing.upload)? {
+        return Err(fault);
     }
     let response: axum::http::Response<reqwest::Body> = response.into();
     let (parts, body) = response.into_parts();
@@ -296,7 +289,7 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        HttpFault, UploadState, authorize_upstream_attempt_at, deadline_outcome,
+        HttpFault, UploadState, authorize_upstream_attempt_at, deadline_outcome, failed_upload,
         selected_send_fault,
     };
 
@@ -339,6 +332,13 @@ mod tests {
             HttpFault::RequestTimeout,
         ))));
         assert_eq!(selected_send_fault(&failed), Ok(HttpFault::RequestTimeout));
+    }
+
+    #[test]
+    fn completed_upstream_response_accepts_an_incomplete_upload() {
+        let incomplete = Some(Arc::new(Mutex::new(UploadState::Incomplete)));
+
+        assert_eq!(failed_upload(&incomplete), Ok(None));
     }
 
     #[test]

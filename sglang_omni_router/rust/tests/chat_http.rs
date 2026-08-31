@@ -24,6 +24,12 @@ struct Captured {
     body: Vec<u8>,
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum WorkerBehavior {
+    ConsumeRequest,
+    RejectAfterHeaders,
+}
+
 struct Worker {
     address: SocketAddr,
     stop: Arc<AtomicBool>,
@@ -41,7 +47,16 @@ impl Worker {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner),
         );
-        Self::start_with_guard(guard)
+        Self::start_with_guard(guard, WorkerBehavior::ConsumeRequest)
+    }
+
+    fn start_early_response() -> Self {
+        let guard = Rc::new(
+            SOCKET_TEST_LOCK
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        Self::start_with_guard(guard, WorkerBehavior::RejectAfterHeaders)
     }
 
     fn start_pair() -> (Self, Self) {
@@ -51,12 +66,12 @@ impl Worker {
                 .unwrap_or_else(std::sync::PoisonError::into_inner),
         );
         (
-            Self::start_with_guard(Rc::clone(&guard)),
-            Self::start_with_guard(guard),
+            Self::start_with_guard(Rc::clone(&guard), WorkerBehavior::ConsumeRequest),
+            Self::start_with_guard(guard, WorkerBehavior::ConsumeRequest),
         )
     }
 
-    fn start_with_guard(guard: Rc<MutexGuard<'static, ()>>) -> Self {
+    fn start_with_guard(guard: Rc<MutexGuard<'static, ()>>, behavior: WorkerBehavior) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind worker fixture");
         listener
             .set_nonblocking(true)
@@ -79,7 +94,7 @@ impl Worker {
                         let healthy = Arc::clone(&thread_healthy);
                         let health_requests = Arc::clone(&thread_health_requests);
                         connections.push(thread::spawn(move || {
-                            serve_connection(stream, captures, healthy, health_requests);
+                            serve_connection(stream, captures, healthy, health_requests, behavior);
                         }));
                     }
                     Ok((_stream, _peer)) => {}
@@ -152,11 +167,26 @@ impl Drop for Worker {
     }
 }
 
+fn read_request_head(stream: &mut TcpStream) -> Option<String> {
+    let mut bytes = Vec::with_capacity(1024);
+    let mut chunk = [0_u8; 1024];
+    while !bytes.windows(4).any(|window| window == b"\r\n\r\n") {
+        let count = stream.read(&mut chunk).ok()?;
+        if count == 0 {
+            return None;
+        }
+        bytes.extend_from_slice(&chunk[..count]);
+    }
+    let split = bytes.windows(4).position(|window| window == b"\r\n\r\n")? + 4;
+    String::from_utf8(bytes[..split].to_vec()).ok()
+}
+
 fn serve_connection(
     mut stream: TcpStream,
     captured: Arc<Mutex<Vec<Captured>>>,
     healthy: Arc<AtomicBool>,
     health_requests: Arc<AtomicUsize>,
+    behavior: WorkerBehavior,
 ) {
     stream
         .set_nonblocking(false)
@@ -167,6 +197,23 @@ fn serve_connection(
     stream
         .set_write_timeout(Some(DEADLINE))
         .expect("bound worker write");
+    if behavior == WorkerBehavior::RejectAfterHeaders {
+        if let Some(head) = read_request_head(&mut stream) {
+            if head.starts_with("GET /health HTTP/1.1") {
+                write_response(
+                    &mut stream,
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                );
+                health_requests.fetch_add(1, Ordering::AcqRel);
+            } else {
+                write_response(
+                    &mut stream,
+                    b"HTTP/1.1 422 Unprocessable Entity\r\nContent-Type: application/json\r\nContent-Length: 18\r\nConnection: close\r\n\r\n{\"early\":\"reject\"}",
+                );
+            }
+        }
+        return;
+    }
     while let Some((head, body)) = read_request(&mut stream) {
         if head.starts_with("GET /health HTTP/1.1") {
             if healthy.load(Ordering::Acquire) {
@@ -741,5 +788,32 @@ fn early_upload_eof_and_downstream_disconnect_release_admission() {
         status(&released),
         429,
         "downstream drop retained the sole admission permit"
+    );
+}
+
+#[test]
+fn early_upstream_response_is_relayed_before_upload_completion() {
+    let worker = Worker::start_early_response();
+    let router = RouterProcess::start(worker.address, 1, 2_000, false);
+    let mut client = TcpStream::connect(router.address).expect("connect streaming upload");
+    client
+        .set_read_timeout(Some(DEADLINE))
+        .expect("bound early-response client read");
+    client
+        .write_all(
+            b"POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 1048576\r\nConnection: close\r\n\r\n{",
+        )
+        .expect("write partial streaming upload");
+
+    let mut response = Vec::new();
+    client
+        .read_to_end(&mut response)
+        .expect("read early upstream response");
+
+    assert_eq!(status(&response), 422);
+    assert!(
+        response
+            .windows(b"early".len())
+            .any(|part| part == b"early")
     );
 }
