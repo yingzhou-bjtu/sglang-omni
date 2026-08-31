@@ -570,10 +570,12 @@ fn build_content_blind_generation_cohorts(
         let Some(first) = members.next() else {
             continue;
         };
-        if members.all(|candidate| {
-            candidate.default_model_id == first.default_model_id
-                && generation_rows_equal(&candidate.profiles, &first.profiles)
-        }) {
+        if first.default_model_id.is_some()
+            && members.all(|candidate| {
+                candidate.default_model_id == first.default_model_id
+                    && generation_rows_equal(&candidate.profiles, &first.profiles)
+            })
+        {
             result.push(HomogeneousGenerationCohort {
                 trust_domain: record.trust_domain.clone(),
             });
@@ -819,6 +821,13 @@ mod tests {
             4,
         );
         assert!(replicas.content_blind_generation_http(&local).is_some());
+
+        let mut missing_default = record(0, "local", "omni", 1);
+        Arc::get_mut(&mut missing_default)
+            .expect("new test record is uniquely owned")
+            .default_model_id = None;
+        let no_default = pool(RoutingStrategy::RoundRobin, vec![missing_default], 4);
+        assert!(no_default.content_blind_generation_http(&local).is_none());
 
         let defaults_differ = pool(
             RoutingStrategy::RoundRobin,
