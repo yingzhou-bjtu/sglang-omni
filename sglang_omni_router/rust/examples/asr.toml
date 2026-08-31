@@ -2,7 +2,7 @@
 schema_version = 1
 
 [server]
-listen = "127.0.0.1:30000"
+listen = "0.0.0.0:30000"
 max_connections = 1024
 
 [shutdown]
