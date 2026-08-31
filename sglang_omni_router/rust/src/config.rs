@@ -448,12 +448,6 @@ impl Config {
             ));
         }
         validate_identifier(&media.trust_domain, "http_media.trust_domain")?;
-        if !self.server.listen.ip().is_loopback() {
-            return Err(ConfigError::invalid(
-                "server.listen",
-                "media HTTP requires a loopback listener",
-            ));
-        }
         if !(1..=67_108_864).contains(&media.buffered_request_max_bytes) {
             return Err(ConfigError::invalid(
                 "http_media.buffered_request_max_bytes",

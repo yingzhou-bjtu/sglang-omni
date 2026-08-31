@@ -133,7 +133,6 @@ fn media_routes_require_exact_task_capacity_and_owned_transport_contracts() {
             "pool_max_idle_per_host = 8",
             "pool_max_idle_per_host = 1025",
         ),
-        base.replace("listen = \"127.0.0.1:30000\"", "listen = \"0.0.0.0:30000\""),
     ] {
         assert!(load_bytes(invalid.as_bytes()).is_err());
     }
