@@ -16,15 +16,18 @@ pub(crate) use admission::{
 pub(crate) use health::{HealthSupervisor, WorkerHealth};
 pub(crate) use profile::{
     BatchFeature, CapacityClass, ChatAudioFormat, MediaPlacement, MediaProfile, MessageContentForm,
-    ModelSelection, ProfileRequirement, ReferenceForm, RouteRequirement, ServiceClass,
-    SpeechResponseFormat, SpeechTask, SpeechToTextTask, StreamMode, TranscriptionResponseFormat,
-    TrustDomain,
+    ModelSelection, ProfileRequirement, RealtimeProtocol, ReferenceForm, RouteRequirement,
+    ServiceClass, SpeechResponseFormat, SpeechTask, SpeechToTextTask, StreamMode,
+    TranscriptionResponseFormat, TrustDomain, valid_model_id,
 };
 pub(crate) use resolver::ResolvedTarget;
 
 use admission::{AdmissionController, AdmissionGate};
 use health::AtomicHealth;
-use profile::{MAX_WORKERS, RegistrationId, ServiceProfile, WorkerCapacityConfig, WorkerId};
+use profile::{
+    CAPACITY_CLASS_COUNT, MAX_WORKERS, RegistrationId, ServiceProfile, WorkerCapacityConfig,
+    WorkerId,
+};
 use resolver::{StaticResolver, build_health_client, build_http_client};
 use selection::Selector;
 
@@ -42,7 +45,7 @@ pub(super) struct WorkerRecord {
     target: ResolvedTarget,
     trust_domain: TrustDomain,
     profiles: Vec<ServiceProfile>,
-    capacity: [Option<CapacitySlot>; 4],
+    capacity: [Option<CapacitySlot>; CAPACITY_CLASS_COUNT],
     health: AtomicHealth,
     immediate_probe: Notify,
 }
@@ -170,6 +173,8 @@ impl WorkerPool {
                 admission_limit(config.admission.speech_http)?,
                 admission_limit(config.admission.speech_batch)?,
                 admission_limit(config.admission.transcription_http)?,
+                admission_limit(config.admission.speech_websocket)?,
+                admission_limit(config.admission.realtime_websocket)?,
             ],
         );
         let mut records = Vec::with_capacity(config.workers.len());
@@ -493,6 +498,20 @@ impl WorkerPool {
         })
     }
 
+    pub(crate) fn service_ready(&self, trust: &TrustDomain, service: ServiceClass) -> bool {
+        self.gate.read().is_ok_and(|gate| {
+            gate.accepting
+                && self.records.iter().any(|record| {
+                    &record.trust_domain == trust
+                        && record.is_routable()
+                        && record
+                            .profiles
+                            .iter()
+                            .any(|profile| profile.service_class() == service)
+                })
+        })
+    }
+
     pub(crate) fn drain(&self) -> Result<(), DispatchError> {
         let mut gate = self.gate.write().map_err(|_| DispatchError::Internal)?;
         if !gate.accepting {
@@ -675,14 +694,16 @@ fn generation_rows_equal(left: &[ServiceProfile], right: &[ServiceProfile]) -> b
 
 fn build_capacity(
     config: &WorkerCapacityConfig,
-) -> Result<[Option<CapacitySlot>; 4], crate::error::RouterError> {
+) -> Result<[Option<CapacitySlot>; CAPACITY_CLASS_COUNT], crate::error::RouterError> {
     let values = [
         config.generation_http,
         config.speech_http,
         config.speech_batch,
         config.transcription_http,
+        config.speech_websocket,
+        config.realtime_websocket,
     ];
-    let mut result: [Option<CapacitySlot>; 4] = std::array::from_fn(|_| None);
+    let mut result: [Option<CapacitySlot>; CAPACITY_CLASS_COUNT] = std::array::from_fn(|_| None);
     for (index, value) in values.into_iter().enumerate() {
         if let Some(value) = value {
             let limit = usize::try_from(value)
@@ -764,6 +785,8 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
+                None,
             ],
             health,
             immediate_probe: Notify::new(),
@@ -796,7 +819,7 @@ mod tests {
             admission: AdmissionController::new(
                 gate,
                 admission,
-                [Some(admission), None, None, None],
+                [Some(admission), None, None, None, None, None],
             ),
             selector: Selector::new(strategy),
             health_client: client.clone(),
@@ -1084,7 +1107,10 @@ mod tests {
                 &requirement("omni", "local"),
             )
             .expect("dispatch");
-        assert_eq!(pool.admission.available(), (0, [Some(0), None, None, None]));
+        assert_eq!(
+            pool.admission.available(),
+            (0, [Some(0), None, None, None, None, None])
+        );
         assert_eq!(
             pool.records[0]
                 .slot(CapacityClass::GenerationHttp)
@@ -1094,7 +1120,10 @@ mod tests {
             0
         );
         drop(lease);
-        assert_eq!(pool.admission.available(), (1, [Some(1), None, None, None]));
+        assert_eq!(
+            pool.admission.available(),
+            (1, [Some(1), None, None, None, None, None])
+        );
         assert_eq!(
             pool.records[0]
                 .slot(CapacityClass::GenerationHttp)
@@ -1164,7 +1193,11 @@ mod tests {
             homogeneous_media_http: build_content_blind_media_cohorts(&records),
             records,
             gate: Arc::clone(&gate),
-            admission: AdmissionController::new(gate, 8, [Some(8), Some(8), Some(8), Some(8)]),
+            admission: AdmissionController::new(
+                gate,
+                8,
+                [Some(8), Some(8), Some(8), Some(8), None, None],
+            ),
             selector: Selector::new(RoutingStrategy::RoundRobin),
             health_client: client.clone(),
             generation_client: None,
