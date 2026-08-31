@@ -375,15 +375,8 @@ async fn send_once(
             return Err(fault);
         }
     };
-    if let Some(state) = upload.as_ref() {
-        match snapshot_upload(state)? {
-            UploadState::Complete => {}
-            UploadState::Failed(fault) => return Err(fault),
-            UploadState::Incomplete => {
-                lease.request_immediate_probe();
-                return Err(HttpFault::UpstreamProtocolError);
-            }
-        }
+    if let Some(fault) = upload_fault(upload.as_ref())? {
+        return Err(fault);
     }
     let response: axum::http::Response<reqwest::Body> = response.into();
     let (parts, body) = response.into_parts();
@@ -437,5 +430,19 @@ const fn map_dispatch(error: DispatchError) -> HttpFault {
         DispatchError::Unavailable | DispatchError::Draining => HttpFault::RouterUnavailable,
         DispatchError::Overloaded => HttpFault::RouterOverloaded,
         DispatchError::Internal => HttpFault::InternalError,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use super::{UploadState, upload_fault};
+
+    #[test]
+    fn completed_upstream_response_accepts_an_incomplete_upload() {
+        let upload = Arc::new(Mutex::new(UploadState::Incomplete));
+
+        assert_eq!(upload_fault(Some(&upload)), Ok(None));
     }
 }
