@@ -99,6 +99,13 @@ fn validates_connection_cap_boundaries() {
 }
 
 #[test]
+fn enabled_router_accepts_non_loopback_listener() {
+    let config = load_bytes(valid_config("0.0.0.0:30000", 30_000, "info").as_bytes())
+        .expect("an explicit non-loopback listener should be valid");
+    assert_eq!(config.server.listen.to_string(), "0.0.0.0:30000");
+}
+
+#[test]
 fn rejects_unknown_duplicate_missing_and_unsupported_schema_fields() {
     let cases = [
         valid_config("127.0.0.1:30000", 30_000, "info").replace(

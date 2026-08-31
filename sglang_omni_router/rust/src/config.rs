@@ -319,12 +319,6 @@ impl Config {
                 "must contain between 1 and 128 bytes",
             ));
         }
-        if !self.server.listen.ip().is_loopback() {
-            return Err(ConfigError::invalid(
-                "server.listen",
-                "chat generation requires a loopback listener",
-            ));
-        }
         if !(1..=67_108_864).contains(&generation.buffered_request_max_bytes) {
             return Err(ConfigError::invalid(
                 "http_generation.buffered_request_max_bytes",
