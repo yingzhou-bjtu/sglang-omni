@@ -38,7 +38,7 @@ impl Drop for TestDir {
 
 fn valid_config(listen: &str, drain_timeout_ms: u64, filter: &str) -> String {
     format!(
-        "schema_version = 1\n\n[server]\nlisten = \"{listen}\"\n\n[shutdown]\ndrain_timeout_ms = {drain_timeout_ms}\n\n[logging]\nformat = \"json\"\nfilter = \"{filter}\"\n"
+        "schema_version = 1\n\n[server]\nlisten = \"{listen}\"\n\n[shutdown]\ndrain_timeout_ms = {drain_timeout_ms}\n\n[logging]\nformat = \"json\"\nfilter = \"{filter}\"\n\n[router]\nstrategy = \"round_robin\"\nmax_concurrent_classifications = 4\n\n[admission]\nglobal = 128\ngeneration_http = 64\n\n[health]\ninterval_ms = 1000\ntimeout_ms = 500\nsuccess_threshold = 2\nfailure_threshold = 3\nmax_concurrent_probes = 8\n\n[http_generation]\ntrust_domain = \"local\"\nbuffered_request_max_bytes = 1048576\nbuffered_request_total_bytes = 8388608\nstreamed_request_max_bytes = 16777216\nconnect_timeout_ms = 1000\nrequest_timeout_ms = 5000\npool_idle_timeout_ms = 30000\npool_max_idle_per_host = 8\n\n[[workers]]\nworker_id = \"worker-a\"\nbase_url = \"http://127.0.0.1:8000/\"\ntrust_domain = \"local\"\ndefault_model_id = \"omni\"\nhealth_path = \"/health\"\n\n[workers.capacity]\ngeneration_http = 8\n\n[[workers.service_profiles]]\nservice = \"generation_http\"\nmodel_ids = [\"omni\"]\nmessage_content_forms = [\"string\"]\nmedia_placements = []\ninput_modalities = [\"text\"]\noutput_modalities = [\"text\"]\nchat_audio_formats = []\nstream_modes = [\"non_streaming\"]\n"
     )
 }
 
@@ -185,4 +185,134 @@ fn parse_errors_include_path_and_cause_without_echoing_contents() {
     assert!(message.contains("router.toml"));
     assert!(message.contains("unknown field"));
     assert!(!message.contains("do-not-log"));
+}
+
+#[test]
+fn routing_schema_rejects_unknowns_invalid_bounds_and_profile_counterexamples() {
+    let base = valid_config("127.0.0.1:30000", 30_000, "info");
+    assert!(
+        load_bytes(
+            base.replace(
+                "pool_max_idle_per_host = 8",
+                "pool_max_idle_per_host = 1024",
+            )
+            .as_bytes(),
+        )
+        .is_ok()
+    );
+    let cases = [
+        base.replace("global = 128", "global = 0"),
+        base.replace(
+            "buffered_request_max_bytes = 1048576",
+            "buffered_request_max_bytes = 0",
+        ),
+        base.replace("connect_timeout_ms = 1000", "connect_timeout_ms = 0"),
+        base.replace("pool_max_idle_per_host = 8", "pool_max_idle_per_host = 0"),
+        base.replace(
+            "pool_max_idle_per_host = 8",
+            "pool_max_idle_per_host = 1025",
+        ),
+        base.replace("worker_id = \"worker-a\"", "worker_id = \"bad worker\""),
+        base.replace(
+            "base_url = \"http://127.0.0.1:8000/\"",
+            "base_url = \"http://worker.invalid:8000/\"",
+        ),
+        base.replace(
+            "default_model_id = \"omni\"",
+            "default_model_id = \"other\"",
+        ),
+        base.replace("generation_http = 8", "generation_http = 0"),
+        base.replace(
+            "message_content_forms = [\"string\"]",
+            "message_content_forms = []",
+        ),
+        base.replace(
+            "trust_domain = \"local\"\nbuffered",
+            "trust_domain = \"remote\"\nbuffered",
+        ),
+        base.replace("global = 128", "global = 128\nfuture_limit = 1"),
+    ];
+    for contents in cases {
+        assert!(load_bytes(contents.as_bytes()).is_err());
+    }
+}
+
+#[test]
+fn worker_origins_and_static_pins_are_strict() {
+    let base = valid_config("127.0.0.1:30000", 30_000, "info");
+    let invalid = [
+        base.replace(
+            "base_url = \"http://127.0.0.1:8000/\"",
+            "base_url = \"http://user:secret@127.0.0.1:8000/\"",
+        ),
+        base.replace(
+            "base_url = \"http://127.0.0.1:8000/\"",
+            "base_url = \"http://127.0.0.1:8000/chat\"",
+        ),
+        base.replace(
+            "base_url = \"http://127.0.0.1:8000/\"",
+            "base_url = \"http://127.0.0.1:8000/?worker=secret\"",
+        ),
+        base.replace(
+            "base_url = \"http://127.0.0.1:8000/\"",
+            "base_url = \"http://127.0.0.1:8000/#secret\"",
+        ),
+        base.replace(
+            "base_url = \"http://127.0.0.1:8000/\"",
+            "base_url = \"http://worker.invalid:8000/\"",
+        ),
+        base.replace(
+            "base_url = \"http://127.0.0.1:8000/\"",
+            "base_url = \"http://127.0.0.1:8000/\"\nresolved_ip = \"127.0.0.2\"",
+        ),
+    ];
+    for contents in invalid {
+        let error = load_bytes(contents.as_bytes()).expect_err("invalid worker target must fail");
+        let message = error.to_string();
+        assert!(message.contains("workers.base_url"));
+        assert!(!message.contains("secret"));
+        assert!(!message.contains("worker.invalid"));
+    }
+
+    let hostname = base.replace(
+        "base_url = \"http://127.0.0.1:8000/\"",
+        "base_url = \"http://worker.invalid:8000/\"\nresolved_ip = \"127.0.0.1\"",
+    );
+    assert!(load_bytes(hostname.as_bytes()).is_ok());
+
+    let matching_literal_pin = base.replace(
+        "base_url = \"http://127.0.0.1:8000/\"",
+        "base_url = \"http://127.0.0.1:8000/\"\nresolved_ip = \"127.0.0.1\"",
+    );
+    assert!(load_bytes(matching_literal_pin.as_bytes()).is_ok());
+}
+
+fn additional_hostname_worker(worker_id: &str, port: u16, resolved_ip: &str) -> String {
+    format!(
+        "\n[[workers]]\nworker_id = \"{worker_id}\"\nbase_url = \"http://worker.invalid:{port}/\"\nresolved_ip = \"{resolved_ip}\"\ntrust_domain = \"local\"\ndefault_model_id = \"omni\"\nhealth_path = \"/health\"\n\n[workers.capacity]\ngeneration_http = 8\n\n[[workers.service_profiles]]\nservice = \"generation_http\"\nmodel_ids = [\"omni\"]\nmessage_content_forms = [\"string\"]\nmedia_placements = []\ninput_modalities = [\"text\"]\noutput_modalities = [\"text\"]\nchat_audio_formats = []\nstream_modes = [\"non_streaming\"]\n"
+    )
+}
+
+#[test]
+fn hostname_resolver_coherence_is_a_safe_config_boundary() {
+    let first = valid_config("127.0.0.1:30000", 30_000, "info").replace(
+        "base_url = \"http://127.0.0.1:8000/\"",
+        "base_url = \"http://worker.invalid:8000/\"\nresolved_ip = \"127.0.0.1\"",
+    );
+
+    let coherent = format!(
+        "{first}{}",
+        additional_hostname_worker("worker-b", 8001, "127.0.0.1")
+    );
+    assert!(load_bytes(coherent.as_bytes()).is_ok());
+
+    let conflicting = format!(
+        "{first}{}",
+        additional_hostname_worker("worker-b", 8001, "127.0.0.2")
+    );
+    let error = load_bytes(conflicting.as_bytes()).expect_err("conflicting pins must fail config");
+    let message = error.to_string();
+    assert!(message.contains("workers.resolved_ip"));
+    assert!(!message.contains("worker.invalid"));
+    assert!(!message.contains("127.0.0"));
 }
