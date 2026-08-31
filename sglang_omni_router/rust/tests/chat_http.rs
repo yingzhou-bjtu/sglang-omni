@@ -360,11 +360,19 @@ struct RouterProcess {
 #[derive(Clone, Copy)]
 enum GenerationProfile {
     Text,
+    TypedImage,
 }
 
 impl GenerationProfile {
     const fn manifest_fields(self) -> &'static str {
-        "message_content_forms = [\"string\"]\nmedia_placements = []\ninput_modalities = [\"text\"]"
+        match self {
+            Self::Text => {
+                "message_content_forms = [\"string\"]\nmedia_placements = []\ninput_modalities = [\"text\"]"
+            }
+            Self::TypedImage => {
+                "message_content_forms = [\"string\", \"typed_parts\"]\nmedia_placements = [\"typed_parts\"]\ninput_modalities = [\"text\", \"image\"]"
+            }
+        }
     }
 }
 
@@ -422,7 +430,7 @@ impl RouterProcess {
         fs::write(
             &config,
             format!(
-                "schema_version = 1\n\n[server]\nlisten = \"{address}\"\nmax_connections = 128\n\n[shutdown]\ndrain_timeout_ms = 2000\n\n[logging]\nformat = \"json\"\nfilter = \"info\"\n\n[router]\nstrategy = \"{strategy}\"\n\n[admission]\nglobal = {global}\ngeneration_http = {global}\n\n[health]\ninterval_ms = 100\ntimeout_ms = 50\nsuccess_threshold = 1\nfailure_threshold = 1\nmax_concurrent_probes = 2\n\n[http_generation]\ntrust_domain = \"local\"\nstreamed_request_max_bytes = 1048576\nconnect_timeout_ms = 100\nrequest_timeout_ms = {timeout_ms}\npool_idle_timeout_ms = 30000\npool_max_idle_per_host = 8\n{worker_config}"
+                "schema_version = 1\n\n[server]\nlisten = \"{address}\"\nmax_connections = 128\n\n[shutdown]\ndrain_timeout_ms = 2000\n\n[logging]\nformat = \"json\"\nfilter = \"info\"\n\n[router]\nstrategy = \"{strategy}\"\nmax_concurrent_classifications = 4\n\n[admission]\nglobal = {global}\ngeneration_http = {global}\n\n[health]\ninterval_ms = 100\ntimeout_ms = 50\nsuccess_threshold = 1\nfailure_threshold = 1\nmax_concurrent_probes = 2\n\n[http_generation]\ntrust_domain = \"local\"\nbuffered_request_max_bytes = 1048576\nbuffered_request_total_bytes = 8388608\nstreamed_request_max_bytes = 1048576\nconnect_timeout_ms = 100\nrequest_timeout_ms = {timeout_ms}\npool_idle_timeout_ms = 30000\npool_max_idle_per_host = 8\n{worker_config}"
             ),
         )
         .expect("write router config");
@@ -833,6 +841,33 @@ fn least_requests_prefers_the_less_occupied_replica() {
     assert_eq!(first.captures().len(), 1);
     assert_eq!(second.captures().len(), 2);
     assert_eq!(status(&slow.join().expect("join slow client")), 200);
+}
+
+#[test]
+fn heterogeneous_typed_image_request_reaches_only_the_compatible_worker() {
+    let (text, image) = Worker::start_pair();
+    let router = RouterProcess::start_workers(
+        &[
+            ("worker-a", text.address, false, GenerationProfile::Text),
+            (
+                "worker-b",
+                image.address,
+                false,
+                GenerationProfile::TypedImage,
+            ),
+        ],
+        8,
+        2_000,
+    );
+    let body = br#"{"model":"omni","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,AA=="}}]}]}"#;
+
+    assert_eq!(status(&post(router.address, body, Some("image-id"))), 200);
+    image.wait_for_requests(1);
+    assert!(text.captures().is_empty());
+    let captures = image.captures();
+    assert_eq!(captures.len(), 1);
+    assert_eq!(captures[0].body, body);
+    assert_eq!(header(&captures[0].head, "x-request-id"), Some("image-id"));
 }
 
 #[test]

@@ -13,6 +13,12 @@ const MAX_MODEL_ID_BYTES: usize = 256;
 const MAX_BASE_URL_BYTES: usize = 2_048;
 const MAX_HEALTH_PATH_BYTES: usize = 128;
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ServiceClass {
+    GenerationHttp,
+}
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct WorkerId(String);
 
@@ -130,6 +136,83 @@ pub(crate) enum ServiceProfile {
     },
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct RouteRequirement {
+    pub(super) profile: ProfileRequirement,
+    trust_domain: TrustDomain,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum ProfileRequirement {
+    GenerationHttp {
+        model: ModelSelection,
+        message_content_forms: Vec<MessageContentForm>,
+        media_placements: Vec<MediaPlacement>,
+        input_modalities: Vec<InputModality>,
+        output_modalities: Vec<OutputModality>,
+        audio_format: Option<ChatAudioFormat>,
+        stream_mode: StreamMode,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum ModelSelection {
+    Explicit(String),
+    WorkerDefault { expected_model_id: String },
+}
+
+impl ModelSelection {
+    pub(crate) fn model_id(&self) -> &str {
+        match self {
+            Self::Explicit(model_id) => model_id,
+            Self::WorkerDefault { expected_model_id } => expected_model_id,
+        }
+    }
+
+    fn matches_worker_default(&self, worker_default: &str) -> bool {
+        match self {
+            Self::Explicit(_) => true,
+            Self::WorkerDefault { expected_model_id } => expected_model_id == worker_default,
+        }
+    }
+}
+
+impl RouteRequirement {
+    pub(crate) fn new(profile: ProfileRequirement, trust_domain: TrustDomain) -> Self {
+        Self {
+            profile,
+            trust_domain,
+        }
+    }
+
+    pub(super) fn trust_domain(&self) -> &TrustDomain {
+        &self.trust_domain
+    }
+}
+
+impl ProfileRequirement {
+    pub(super) fn is_well_formed(&self) -> bool {
+        match self {
+            Self::GenerationHttp {
+                model,
+                message_content_forms,
+                media_placements,
+                input_modalities,
+                output_modalities,
+                audio_format,
+                ..
+            } => {
+                valid_model_id(model.model_id())
+                    && valid_requirement_set(message_content_forms, false)
+                    && valid_requirement_set(media_placements, true)
+                    && valid_requirement_set(input_modalities, false)
+                    && valid_requirement_set(output_modalities, false)
+                    && output_modalities.contains(&OutputModality::Audio) == audio_format.is_some()
+            }
+        }
+    }
+}
+
 impl ServiceProfile {
     pub(super) fn validate(&self) -> Result<(), ConfigError> {
         match self {
@@ -211,6 +294,42 @@ impl ServiceProfile {
                     && set_eq(a_outputs, b_outputs)
                     && set_eq(a_audio, b_audio)
                     && set_eq(a_streams, b_streams)
+            }
+        }
+    }
+
+    pub(super) fn matches(&self, requirement: &ProfileRequirement, worker_default: &str) -> bool {
+        match (self, requirement) {
+            (
+                Self::GenerationHttp {
+                    model_ids,
+                    message_content_forms,
+                    media_placements,
+                    input_modalities,
+                    output_modalities,
+                    chat_audio_formats,
+                    stream_modes,
+                },
+                ProfileRequirement::GenerationHttp {
+                    model,
+                    message_content_forms: required_forms,
+                    media_placements: required_placements,
+                    input_modalities: required_inputs,
+                    output_modalities: required_outputs,
+                    audio_format,
+                    stream_mode,
+                },
+            ) => {
+                model.matches_worker_default(worker_default)
+                    && model_ids
+                        .iter()
+                        .any(|candidate| candidate == model.model_id())
+                    && contains_all(message_content_forms, required_forms)
+                    && contains_all(media_placements, required_placements)
+                    && contains_all(input_modalities, required_inputs)
+                    && contains_all(output_modalities, required_outputs)
+                    && audio_format.is_none_or(|format| chat_audio_formats.contains(&format))
+                    && stream_modes.contains(stream_mode)
             }
         }
     }
@@ -377,8 +496,16 @@ fn validate_set<T: Eq + std::hash::Hash>(
     Ok(())
 }
 
+fn valid_requirement_set<T: Eq + std::hash::Hash>(values: &[T], allow_empty: bool) -> bool {
+    validate_set(values, "internal", allow_empty).is_ok()
+}
+
 fn set_eq<T: Eq>(left: &[T], right: &[T]) -> bool {
     left.len() == right.len() && left.iter().all(|item| right.contains(item))
+}
+
+fn contains_all<T: Eq>(available: &[T], required: &[T]) -> bool {
+    required.iter().all(|item| available.contains(item))
 }
 
 pub(crate) fn validate_identifier(value: &str, field: &'static str) -> Result<(), ConfigError> {
@@ -468,5 +595,30 @@ mod tests {
             stream_modes: vec![StreamMode::Streaming],
         }];
         assert!(validate_workers(&[invalid_audio]).is_err());
+    }
+
+    #[test]
+    fn matching_never_combines_correlated_rows() {
+        let text = profile("omni");
+        let audio = ServiceProfile::GenerationHttp {
+            model_ids: vec![String::from("audio")],
+            message_content_forms: vec![MessageContentForm::TypedParts],
+            media_placements: vec![MediaPlacement::TypedParts],
+            input_modalities: vec![InputModality::Audio],
+            output_modalities: vec![OutputModality::Audio],
+            chat_audio_formats: vec![ChatAudioFormat::Wav],
+            stream_modes: vec![StreamMode::Streaming],
+        };
+        let cross_row = ProfileRequirement::GenerationHttp {
+            model: ModelSelection::Explicit(String::from("omni")),
+            message_content_forms: vec![MessageContentForm::TypedParts],
+            media_placements: vec![MediaPlacement::TypedParts],
+            input_modalities: vec![InputModality::Audio],
+            output_modalities: vec![OutputModality::Audio],
+            audio_format: Some(ChatAudioFormat::Wav),
+            stream_mode: StreamMode::Streaming,
+        };
+        assert!(!text.matches(&cross_row, "omni"));
+        assert!(!audio.matches(&cross_row, "audio"));
     }
 }
