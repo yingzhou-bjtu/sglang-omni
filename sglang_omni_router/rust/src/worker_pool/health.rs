@@ -482,6 +482,9 @@ mod tests {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
                         server_count.fetch_add(1, Ordering::AcqRel);
+                        stream
+                            .set_nonblocking(false)
+                            .expect("set second coalesced probe blocking");
                         let _bytes = stream
                             .read(&mut request)
                             .expect("read second coalesced probe");
