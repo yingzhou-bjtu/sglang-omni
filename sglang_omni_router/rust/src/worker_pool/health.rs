@@ -8,16 +8,16 @@ use tokio::task::{JoinError, JoinSet};
 
 use super::WorkerRecord;
 
-/// Probe health independent of serving/draining disposition.
+/// Health observed by the worker probe loop.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
-pub(crate) enum HealthState {
+pub(crate) enum WorkerHealth {
     Unknown = 0,
     Healthy = 1,
     Unhealthy = 2,
 }
 
-impl HealthState {
+impl WorkerHealth {
     fn from_atomic(value: u8) -> Self {
         match value {
             1 => Self::Healthy,
@@ -29,18 +29,18 @@ impl HealthState {
 
 /// Atomic health cell. Release/Acquire publishes only the state transition;
 /// capability and capacity remain immutable/semaphore-owned respectively.
-pub(super) struct HealthCell(AtomicU8);
+pub(super) struct AtomicHealth(AtomicU8);
 
-impl HealthCell {
+impl AtomicHealth {
     pub(super) const fn unknown() -> Self {
-        Self(AtomicU8::new(HealthState::Unknown as u8))
+        Self(AtomicU8::new(WorkerHealth::Unknown as u8))
     }
 
-    pub(super) fn load(&self) -> HealthState {
-        HealthState::from_atomic(self.0.load(Ordering::Acquire))
+    pub(super) fn load(&self) -> WorkerHealth {
+        WorkerHealth::from_atomic(self.0.load(Ordering::Acquire))
     }
 
-    pub(super) fn store(&self, state: HealthState) {
+    pub(super) fn store(&self, state: WorkerHealth) {
         self.0.store(state as u8, Ordering::Release);
     }
 }
@@ -115,7 +115,7 @@ async fn run_worker_health(
 ) -> Result<(), HealthTaskError> {
     let mut ticker = tokio::time::interval(interval);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    let mut tracker = HealthTracker::new(success_threshold, failure_threshold);
+    let mut tracker = ProbeTracker::new(success_threshold, failure_threshold);
 
     loop {
         tokio::select! {
@@ -173,37 +173,37 @@ async fn run_worker_health(
     }
 }
 
-struct HealthTracker {
+struct ProbeTracker {
     successes: u8,
     failures: u8,
     success_threshold: u8,
     failure_threshold: u8,
-    state: HealthState,
+    state: WorkerHealth,
 }
 
-impl HealthTracker {
+impl ProbeTracker {
     fn new(success_threshold: u8, failure_threshold: u8) -> Self {
         Self {
             successes: 0,
             failures: 0,
             success_threshold,
             failure_threshold,
-            state: HealthState::Unknown,
+            state: WorkerHealth::Unknown,
         }
     }
 
-    fn observe(&mut self, success: bool) -> HealthState {
+    fn observe(&mut self, success: bool) -> WorkerHealth {
         if success {
             self.failures = 0;
             self.successes = self.successes.saturating_add(1);
             if self.successes >= self.success_threshold {
-                self.state = HealthState::Healthy;
+                self.state = WorkerHealth::Healthy;
             }
         } else {
             self.successes = 0;
             self.failures = self.failures.saturating_add(1);
             if self.failures >= self.failure_threshold {
-                self.state = HealthState::Unhealthy;
+                self.state = WorkerHealth::Unhealthy;
             }
         }
         self.state
@@ -222,13 +222,13 @@ mod tests {
 
     use tokio::sync::{Notify, Semaphore};
 
-    use super::{HealthCell, HealthState, HealthSupervisor, HealthTracker};
+    use super::{AtomicHealth, HealthSupervisor, ProbeTracker, WorkerHealth};
     use crate::worker_pool::profile::{
         InputModality, MessageContentForm, OutputModality, RegistrationId, ServiceProfile,
         StreamMode, TrustDomain, WorkerId,
     };
     use crate::worker_pool::resolver::{ResolvedTarget, StaticResolver, build_health_client};
-    use crate::worker_pool::{CapacitySlot, Disposition, WorkerRecord};
+    use crate::worker_pool::{CapacitySlot, WorkerRecord};
 
     fn test_target(address: SocketAddr) -> ResolvedTarget {
         ResolvedTarget::from_parts(&format!("http://{address}/"), "/health", None)
@@ -255,8 +255,7 @@ mod tests {
                 limit: 1,
                 semaphore: Arc::new(Semaphore::new(1)),
             },
-            health: HealthCell::unknown(),
-            disposition: AtomicU8::new(Disposition::Serving as u8),
+            health: AtomicHealth::unknown(),
             immediate_probe: Notify::new(),
         })
     }
@@ -270,14 +269,14 @@ mod tests {
 
     #[test]
     fn hysteresis_preserves_unknown_and_requires_consecutive_observations() {
-        let mut tracker = HealthTracker::new(2, 3);
-        assert_eq!(tracker.observe(true), HealthState::Unknown);
-        assert_eq!(tracker.observe(false), HealthState::Unknown);
-        assert_eq!(tracker.observe(false), HealthState::Unknown);
-        assert_eq!(tracker.observe(false), HealthState::Unhealthy);
-        assert_eq!(tracker.observe(true), HealthState::Unhealthy);
-        assert_eq!(tracker.observe(true), HealthState::Healthy);
-        assert_eq!(tracker.observe(false), HealthState::Healthy);
+        let mut tracker = ProbeTracker::new(2, 3);
+        assert_eq!(tracker.observe(true), WorkerHealth::Unknown);
+        assert_eq!(tracker.observe(false), WorkerHealth::Unknown);
+        assert_eq!(tracker.observe(false), WorkerHealth::Unknown);
+        assert_eq!(tracker.observe(false), WorkerHealth::Unhealthy);
+        assert_eq!(tracker.observe(true), WorkerHealth::Unhealthy);
+        assert_eq!(tracker.observe(true), WorkerHealth::Healthy);
+        assert_eq!(tracker.observe(false), WorkerHealth::Healthy);
     }
 
     #[tokio::test]
@@ -309,11 +308,12 @@ mod tests {
             1,
         );
         let deadline = tokio::time::Instant::now() + Duration::from_millis(200);
-        while record.health.load() != HealthState::Healthy && tokio::time::Instant::now() < deadline
+        while record.health.load() != WorkerHealth::Healthy
+            && tokio::time::Instant::now() < deadline
         {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
-        assert_eq!(record.health.load(), HealthState::Healthy);
+        assert_eq!(record.health.load(), WorkerHealth::Healthy);
         supervisor.cancel();
         assert!(matches!(supervisor.join_next().await, Some(Ok(Ok(())))));
         server.join().expect("join health fixture server");
@@ -340,12 +340,12 @@ mod tests {
             1,
         );
         let deadline = tokio::time::Instant::now() + Duration::from_millis(150);
-        while record.health.load() != HealthState::Unhealthy
+        while record.health.load() != WorkerHealth::Unhealthy
             && tokio::time::Instant::now() < deadline
         {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
-        assert_eq!(record.health.load(), HealthState::Unhealthy);
+        assert_eq!(record.health.load(), WorkerHealth::Unhealthy);
         supervisor.cancel();
         assert!(matches!(supervisor.join_next().await, Some(Ok(Ok(())))));
         server.join().expect("join timeout fixture server");
@@ -376,7 +376,7 @@ mod tests {
             1,
         );
         tokio::time::timeout(Duration::from_secs(1), async {
-            while record.health.load() != HealthState::Unhealthy {
+            while record.health.load() != WorkerHealth::Unhealthy {
                 tokio::task::yield_now().await;
             }
         })
@@ -598,7 +598,7 @@ mod tests {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
         while records
             .iter()
-            .any(|record| record.health.load() != HealthState::Healthy)
+            .any(|record| record.health.load() != WorkerHealth::Healthy)
             && tokio::time::Instant::now() < deadline
         {
             tokio::time::sleep(Duration::from_millis(5)).await;
@@ -606,7 +606,7 @@ mod tests {
         assert!(
             records
                 .iter()
-                .all(|record| record.health.load() == HealthState::Healthy)
+                .all(|record| record.health.load() == WorkerHealth::Healthy)
         );
         server.join().expect("join concurrency fixture");
         assert!(maximum.load(Ordering::Acquire) <= MAX_CONCURRENT);

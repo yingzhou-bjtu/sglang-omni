@@ -1,41 +1,33 @@
+mod admission;
 mod health;
-mod permit;
 pub(crate) mod profile;
 mod resolver;
 mod selection;
 
-use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, RwLock};
 
 use tokio::sync::{Notify, Semaphore};
 
 use crate::config::{Config, RoutingStrategy};
 
-pub(crate) use health::{HealthState, HealthSupervisor, HealthTaskError};
-pub(crate) use permit::{AdmissionError, AdmissionLease, DispatchError, RequestLease};
+pub(crate) use admission::{AdmissionError, AdmissionLease, DispatchError, RequestLease};
+pub(crate) use health::{HealthSupervisor, HealthTaskError, WorkerHealth};
 pub(crate) use profile::TrustDomain;
 pub(crate) use resolver::ResolvedTarget;
 
-use health::HealthCell;
-use permit::{AdmissionController, Gate};
+use admission::{AdmissionController, AdmissionGate};
+use health::AtomicHealth;
 use profile::{MAX_WORKERS, RegistrationId, ServiceProfile, WorkerCapacityConfig, WorkerId};
 use resolver::{StaticResolver, build_generation_client, build_health_client};
 use selection::Selector;
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[repr(u8)]
-enum Disposition {
-    Serving = 0,
-    Draining = 1,
-}
 
 struct CapacitySlot {
     limit: usize,
     semaphore: Arc<Semaphore>,
 }
 
-/// One immutable startup registration plus independent health, disposition,
-/// and exact generation-capacity owners.
+/// One immutable startup registration with independently updated health and
+/// exact generation-capacity ownership.
 pub(super) struct WorkerRecord {
     worker_id: WorkerId,
     default_model_id: String,
@@ -44,31 +36,17 @@ pub(super) struct WorkerRecord {
     trust_domain: TrustDomain,
     profiles: Vec<ServiceProfile>,
     capacity: CapacitySlot,
-    health: HealthCell,
-    disposition: AtomicU8,
+    health: AtomicHealth,
     immediate_probe: Notify,
 }
 
 impl WorkerRecord {
-    fn disposition(&self) -> Disposition {
-        if self.disposition.load(Ordering::Acquire) == Disposition::Serving as u8 {
-            Disposition::Serving
-        } else {
-            Disposition::Draining
-        }
-    }
-
-    fn mark_draining(&self) {
-        self.disposition
-            .store(Disposition::Draining as u8, Ordering::Release);
-    }
-
     fn occupancy_snapshot(&self) -> usize {
         self.capacity.limit - self.capacity.semaphore.available_permits()
     }
 
-    fn available_for_dispatch(&self) -> bool {
-        self.health.load() == HealthState::Healthy && self.disposition() == Disposition::Serving
+    fn is_routable(&self) -> bool {
+        self.health.load() == WorkerHealth::Healthy
     }
 }
 
@@ -76,7 +54,7 @@ impl WorkerRecord {
 /// deterministic policy state, and independently owned health.
 pub(crate) struct WorkerPool {
     records: Vec<Arc<WorkerRecord>>,
-    gate: Arc<RwLock<Gate>>,
+    gate: Arc<RwLock<AdmissionGate>>,
     admission: AdmissionController,
     selector: Selector,
     homogeneous_generation_http: Vec<HomogeneousGenerationCohort>,
@@ -119,7 +97,7 @@ impl WorkerPool {
             config.http_generation.pool_max_idle_per_host,
         )
         .map_err(crate::error::RouterError::GenerationClient)?;
-        let gate = Arc::new(RwLock::new(Gate::open()));
+        let gate = Arc::new(RwLock::new(AdmissionGate::open()));
         let admission = AdmissionController::new(
             Arc::clone(&gate),
             usize::try_from(config.admission.global)
@@ -137,8 +115,7 @@ impl WorkerPool {
                 trust_domain: TrustDomain::new(worker.trust_domain.clone()),
                 profiles: worker.service_profiles.clone(),
                 capacity: build_capacity(&worker.capacity)?,
-                health: HealthCell::unknown(),
-                disposition: AtomicU8::new(Disposition::Serving as u8),
+                health: AtomicHealth::unknown(),
                 immediate_probe: Notify::new(),
             }));
         }
@@ -185,14 +162,14 @@ impl WorkerPool {
         let eligible_count = self
             .records
             .iter()
-            .filter(|record| matches(record) && record.available_for_dispatch())
+            .filter(|record| matches(record) && record.is_routable())
             .count();
         if eligible_count == 0 {
             return Err(DispatchError::Unavailable);
         }
         let policy_guard = self.selector.least_requests_guard();
         let gate = self.gate.read().map_err(|_| DispatchError::Internal)?;
-        if !gate.open {
+        if !gate.accepting {
             return Err(DispatchError::Draining);
         }
         let selected = match self.selector.strategy() {
@@ -212,7 +189,7 @@ impl WorkerPool {
             None if self
                 .records
                 .iter()
-                .any(|record| matches(record) && record.available_for_dispatch()) =>
+                .any(|record| matches(record) && record.is_routable()) =>
             {
                 Err(DispatchError::Overloaded)
             }
@@ -228,7 +205,7 @@ impl WorkerPool {
         for pass in 0..2 {
             let mut eligible_ordinal = 0;
             for record in &self.records {
-                if !matches(record) || !record.available_for_dispatch() {
+                if !matches(record) || !record.is_routable() {
                     continue;
                 }
                 let in_pass = if pass == 0 {
@@ -255,7 +232,7 @@ impl WorkerPool {
         let mut snapshots = [usize::MAX; MAX_WORKERS];
         let mut attempted = [false; MAX_WORKERS];
         for (index, record) in self.records.iter().enumerate() {
-            if matches(record) && record.available_for_dispatch() {
+            if matches(record) && record.is_routable() {
                 *snapshots.get_mut(index)? = record.occupancy_snapshot();
             }
         }
@@ -308,23 +285,22 @@ impl WorkerPool {
 
     pub(crate) fn generation_http_ready(&self, trust: &TrustDomain) -> bool {
         self.gate.read().is_ok_and(|gate| {
-            gate.open
+            gate.accepting
                 && self
                     .records
                     .iter()
-                    .any(|record| &record.trust_domain == trust && record.available_for_dispatch())
+                    .any(|record| &record.trust_domain == trust && record.is_routable())
         })
     }
 
     pub(crate) fn drain(&self) -> Result<(), DispatchError> {
         let mut gate = self.gate.write().map_err(|_| DispatchError::Internal)?;
-        if !gate.open {
+        if !gate.accepting {
             return Ok(());
         }
-        gate.open = false;
+        gate.accepting = false;
         self.admission.close();
         for record in &self.records {
-            record.mark_draining();
             record.capacity.semaphore.close();
         }
         Ok(())
@@ -416,8 +392,8 @@ mod tests {
         limit: usize,
         service_profile: ServiceProfile,
     ) -> Arc<WorkerRecord> {
-        let health = HealthCell::unknown();
-        health.store(HealthState::Healthy);
+        let health = AtomicHealth::unknown();
+        health.store(WorkerHealth::Healthy);
         Arc::new(WorkerRecord {
             worker_id: WorkerId::new(format!("worker-{ordinal}")),
             default_model_id: model.to_owned(),
@@ -435,7 +411,6 @@ mod tests {
                 semaphore: Arc::new(Semaphore::new(limit)),
             },
             health,
-            disposition: AtomicU8::new(Disposition::Serving as u8),
             immediate_probe: Notify::new(),
         })
     }
@@ -449,7 +424,7 @@ mod tests {
         records: Vec<Arc<WorkerRecord>>,
         admission: usize,
     ) -> WorkerPool {
-        let gate = Arc::new(RwLock::new(Gate::open()));
+        let gate = Arc::new(RwLock::new(AdmissionGate::open()));
         let targets: Vec<_> = records.iter().map(|record| record.target.clone()).collect();
         let resolver = Arc::new(StaticResolver::from_targets(&targets).expect("test resolver"));
         let client = build_health_client(
@@ -578,7 +553,7 @@ mod tests {
     }
 
     #[test]
-    fn round_robin_balances_and_skips_full_unhealthy_and_draining_workers() {
+    fn round_robin_balances_and_skips_full_or_unhealthy_workers() {
         let records = vec![record(0, "local", "omni", 1), record(1, "local", "omni", 1)];
         let pool = pool(RoutingStrategy::RoundRobin, records.clone(), 8);
         let trust = TrustDomain::new(String::from("local"));
@@ -595,8 +570,8 @@ mod tests {
         assert_ne!(first.registration_ordinal(), second.registration_ordinal());
         drop(first);
         drop(second);
-        records[0].health.store(HealthState::Unhealthy);
-        records[1].mark_draining();
+        records[0].health.store(WorkerHealth::Unhealthy);
+        records[1].health.store(WorkerHealth::Unhealthy);
         let unavailable = pool
             .content_blind_generation_http(&trust)
             .expect("homogeneous cohort")
@@ -683,15 +658,15 @@ mod tests {
     }
 
     #[test]
-    fn readiness_starts_unknown_and_tracks_health_and_disposition() {
+    fn readiness_tracks_worker_health_and_router_admission() {
         let record = record(0, "local", "omni", 1);
-        record.health.store(HealthState::Unknown);
+        record.health.store(WorkerHealth::Unknown);
         let pool = pool(RoutingStrategy::RoundRobin, vec![Arc::clone(&record)], 1);
         let trust = TrustDomain::new(String::from("local"));
         assert!(!pool.generation_http_ready(&trust));
-        record.health.store(HealthState::Healthy);
+        record.health.store(WorkerHealth::Healthy);
         assert!(pool.generation_http_ready(&trust));
-        record.mark_draining();
+        pool.drain().expect("drain pool");
         assert!(!pool.generation_http_ready(&trust));
     }
 }

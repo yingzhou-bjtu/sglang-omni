@@ -7,13 +7,13 @@ use super::{ResolvedTarget, WorkerRecord};
 
 /// One read/write gate linearizes fail-fast admission and exact reservation
 /// against process drain. No guard crosses an await point.
-pub(super) struct Gate {
-    pub(super) open: bool,
+pub(super) struct AdmissionGate {
+    pub(super) accepting: bool,
 }
 
-impl Gate {
+impl AdmissionGate {
     pub(super) const fn open() -> Self {
-        Self { open: true }
+        Self { accepting: true }
     }
 }
 
@@ -82,13 +82,13 @@ impl RequestLease {
 }
 
 pub(super) struct AdmissionController {
-    gate: Arc<RwLock<Gate>>,
+    gate: Arc<RwLock<AdmissionGate>>,
     global: Arc<Semaphore>,
     generation: Arc<Semaphore>,
 }
 
 impl AdmissionController {
-    pub(super) fn new(gate: Arc<RwLock<Gate>>, global: usize, generation: usize) -> Self {
+    pub(super) fn new(gate: Arc<RwLock<AdmissionGate>>, global: usize, generation: usize) -> Self {
         Self {
             gate,
             global: Arc::new(Semaphore::new(global)),
@@ -98,7 +98,7 @@ impl AdmissionController {
 
     pub(super) fn try_admit(&self) -> Result<AdmissionLease, AdmissionError> {
         let gate = self.gate.read().map_err(|_| AdmissionError::Internal)?;
-        if !gate.open {
+        if !gate.accepting {
             return Err(AdmissionError::Draining);
         }
         let global = Arc::clone(&self.global)
