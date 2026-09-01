@@ -1,3 +1,4 @@
+use std::hash::{BuildHasher, RandomState};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -29,8 +30,10 @@ pub(crate) struct RequestIds {
 
 impl RequestIds {
     pub(crate) fn new() -> Arc<Self> {
+        let process_id = std::process::id();
+        let nonce = RandomState::new().hash_one(process_id);
         Arc::new(Self {
-            prefix: format!("sglang-omni-{}", std::process::id()),
+            prefix: format!("sglang-omni-{process_id}-{nonce:016x}"),
             sequence: AtomicU64::new(0),
         })
     }
@@ -108,7 +111,14 @@ mod tests {
             .canonicalize(&HeaderMap::new())
             .expect("sequence remains available");
         assert!(accepted);
-        assert!(!generated.into_header_value().is_empty());
+        let generated = generated.into_header_value();
+        let generated = generated.to_str().expect("generated ID is visible ASCII");
+        let fields: Vec<_> = generated.split('-').collect();
+        assert_eq!(fields[..2], ["sglang", "omni"]);
+        assert_eq!(fields[2], std::process::id().to_string());
+        assert_eq!(fields[3].len(), 16);
+        assert!(fields[3].bytes().all(|byte| byte.is_ascii_hexdigit()));
+        assert_eq!(fields[4], "0");
 
         let mut headers = HeaderMap::new();
         headers.insert("x-request-id", HeaderValue::from_static("caller,visible;1"));
