@@ -223,20 +223,30 @@ impl HttpFault {
         }
     }
 
+    fn error_type(self) -> &'static str {
+        match self.status() {
+            StatusCode::TOO_MANY_REQUESTS => "rate_limit_error",
+            status if status.is_client_error() => "invalid_request_error",
+            _ => "server_error",
+        }
+    }
+
     pub(crate) fn into_response(self) -> Response<Body> {
         let body = format!(
-            "{{\"error\":{{\"code\":\"{}\",\"message\":\"{}\"}}}}",
-            self.code(),
-            self.message()
+            "{{\"error\":{{\"message\":\"{}\",\"type\":\"{}\",\"param\":null,\"code\":\"{}\"}}}}",
+            self.message(),
+            self.error_type(),
+            self.code()
         );
-        let mut response = Response::new(Body::from(body.clone()));
+        let content_length = body.len();
+        let mut response = Response::new(Body::from(body));
         *response.status_mut() = self.status();
         response
             .headers_mut()
             .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         response
             .headers_mut()
-            .insert(CONTENT_LENGTH, HeaderValue::from(body.len()));
+            .insert(CONTENT_LENGTH, HeaderValue::from(content_length));
         response
             .headers_mut()
             .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));

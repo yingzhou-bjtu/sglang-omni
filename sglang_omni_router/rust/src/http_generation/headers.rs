@@ -24,7 +24,11 @@ pub(crate) fn validate_request(headers: &HeaderMap) -> Result<RequestFraming, Ht
     if headers.contains_key(CONTENT_ENCODING) {
         return Err(HttpFault::UnsupportedContentEncoding);
     }
-    if headers.contains_key(EXPECT) {
+    let mut expectations = headers.get_all(EXPECT).iter();
+    if let Some(expectation) = expectations.next()
+        && (!expectation.as_bytes().eq_ignore_ascii_case(b"100-continue")
+            || expectations.next().is_some())
+    {
         return Err(HttpFault::ExpectationFailed);
     }
     if headers.contains_key(TRAILER) {
@@ -41,15 +45,6 @@ pub(crate) fn validate_request(headers: &HeaderMap) -> Result<RequestFraming, Ht
     let content_length = content_length
         .and_then(parse_content_length)
         .ok_or(HttpFault::MalformedRequest)?;
-    for forbidden in [
-        "x-smg-target-worker",
-        "x-smg-routing-key",
-        "x-sgl-decode-url",
-    ] {
-        if headers.contains_key(forbidden) {
-            return Err(HttpFault::MalformedRequest);
-        }
-    }
     Ok(RequestFraming { content_length })
 }
 
@@ -315,7 +310,7 @@ pub(crate) fn canonical_content_type() -> HeaderValue {
 #[allow(clippy::expect_used)]
 mod tests {
     use axum::http::header::{
-        CACHE_CONTROL, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE, TRANSFER_ENCODING,
+        CACHE_CONTROL, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE, EXPECT, TRANSFER_ENCODING,
     };
     use axum::http::{HeaderMap, HeaderValue, StatusCode};
 
@@ -374,6 +369,45 @@ mod tests {
             validate_request(&duplicate_length).err(),
             Some(HttpFault::MalformedRequest)
         );
+    }
+
+    #[test]
+    fn request_envelope_accepts_only_one_standard_expectation() {
+        let mut accepted = valid_request_headers();
+        accepted.insert(EXPECT, HeaderValue::from_static("100-Continue"));
+        assert!(validate_request(&accepted).is_ok());
+
+        for value in ["continue", "100-continue, custom"] {
+            let mut rejected = valid_request_headers();
+            rejected.insert(EXPECT, HeaderValue::from_static(value));
+            assert_eq!(
+                validate_request(&rejected).err(),
+                Some(HttpFault::ExpectationFailed)
+            );
+        }
+
+        let mut duplicate = valid_request_headers();
+        duplicate.append(EXPECT, HeaderValue::from_static("100-continue"));
+        duplicate.append(EXPECT, HeaderValue::from_static("100-continue"));
+        assert_eq!(
+            validate_request(&duplicate).err(),
+            Some(HttpFault::ExpectationFailed)
+        );
+    }
+
+    #[test]
+    fn gateway_hints_are_ignored_at_the_client_boundary() {
+        let mut headers = valid_request_headers();
+        headers.insert(
+            "x-smg-target-worker",
+            HeaderValue::from_static("external-choice"),
+        );
+        headers.insert("x-smg-routing-key", HeaderValue::from_static("key"));
+        headers.insert(
+            "x-sgl-decode-url",
+            HeaderValue::from_static("http://untrusted.invalid"),
+        );
+        assert!(validate_request(&headers).is_ok());
     }
 
     #[test]

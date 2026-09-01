@@ -624,6 +624,14 @@ fn strict_envelopes_fail_before_dispatch_and_missing_ids_are_generated() {
         header(response_head(&get), "content-type"),
         Some("application/json")
     );
+    for field in [
+        b"\"message\"".as_slice(),
+        b"\"type\":\"invalid_request_error\"".as_slice(),
+        b"\"param\":null".as_slice(),
+        b"\"code\":\"method_not_allowed\"".as_slice(),
+    ] {
+        assert!(get.windows(field.len()).any(|part| part == field));
+    }
 
     for (request, expected) in [
         (b"POST /v1/chat/completions?x=1 HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}".as_slice(), 400),
@@ -650,6 +658,41 @@ fn strict_envelopes_fail_before_dispatch_and_missing_ids_are_generated() {
     }
     thread::sleep(Duration::from_millis(20));
     assert_eq!(worker.captures().len(), 1);
+}
+
+#[test]
+fn standard_continue_expectation_is_terminated_locally_and_not_forwarded() {
+    let worker = Worker::start();
+    let router = RouterProcess::start(worker.address, 8, 2_000, false);
+    let mut client = TcpStream::connect(router.address).expect("connect expect client");
+    client
+        .set_read_timeout(Some(DEADLINE))
+        .expect("bound expect response");
+    client
+        .write_all(
+            b"POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 2\r\nExpect: 100-Continue\r\nConnection: close\r\n\r\n",
+        )
+        .expect("write expect request head");
+
+    let mut interim = [0_u8; 64];
+    let count = client.read(&mut interim).expect("read continue response");
+    assert!(interim[..count].starts_with(b"HTTP/1.1 100 Continue\r\n\r\n"));
+    client.write_all(b"{}").expect("write expected body");
+    let mut response = Vec::new();
+    client
+        .read_to_end(&mut response)
+        .expect("read final expect response");
+    assert_eq!(status(&response), 200);
+
+    worker.wait_for_requests(1);
+    assert!(header(&worker.captures()[0].head, "expect").is_none());
+
+    let rejected = raw_request(
+        router.address,
+        b"POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 2\r\nExpect: custom\r\nConnection: close\r\n\r\n{}",
+    )
+    .expect("read unsupported expectation response");
+    assert_eq!(status(&rejected), 417);
 }
 
 #[test]
