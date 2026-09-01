@@ -937,7 +937,6 @@ dependencies = [
  "reqwest",
  "rlimit",
  "serde",
- "serde_json",
  "sync_wrapper",
  "thiserror",
  "tokio",
