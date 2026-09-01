@@ -259,6 +259,13 @@ fn serve_connection(
                 );
             }
             b"reset" => return,
+            b"mid-body-reset" => {
+                write_response(
+                    &mut stream,
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\nB\r\ndata: one\n\n\r\n",
+                );
+                return;
+            }
             _ => write_response(
                 &mut stream,
                 b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 8\r\nCache-Control: private\r\nCache-Control: max-age=0\r\nSet-Cookie: hidden=1\r\nConnection: keep-alive\r\n\r\n{\"ok\":1}",
@@ -363,10 +370,12 @@ impl GenerationProfile {
 
 impl RouterProcess {
     fn start(worker: SocketAddr, global: u32, timeout_ms: u64, hostname: bool) -> Self {
-        Self::start_workers(
+        Self::start_configured(
             &[("worker-a", worker, hostname, GenerationProfile::Text)],
             global,
+            global,
             timeout_ms,
+            "round_robin",
         )
     }
 
@@ -374,6 +383,16 @@ impl RouterProcess {
         workers: &[(&str, SocketAddr, bool, GenerationProfile)],
         global: u32,
         timeout_ms: u64,
+    ) -> Self {
+        Self::start_configured(workers, global, global, timeout_ms, "round_robin")
+    }
+
+    fn start_configured(
+        workers: &[(&str, SocketAddr, bool, GenerationProfile)],
+        global: u32,
+        worker_capacity: u32,
+        timeout_ms: u64,
+        strategy: &str,
     ) -> Self {
         let reservation = TcpListener::bind("127.0.0.1:0").expect("reserve router address");
         let address = reservation.local_addr().expect("read router address");
@@ -397,13 +416,13 @@ impl RouterProcess {
             };
             let profile_fields = profile.manifest_fields();
             worker_config.push_str(&format!(
-                "\n[[workers]]\nworker_id = \"{worker_id}\"\nbase_url = \"{base_url}\"\n{resolved_ip}trust_domain = \"local\"\ndefault_model_id = \"omni\"\nhealth_path = \"/health\"\n\n[workers.capacity]\ngeneration_http = {global}\n\n[[workers.service_profiles]]\nservice = \"generation_http\"\nmodel_ids = [\"omni\"]\n{profile_fields}\noutput_modalities = [\"text\"]\nchat_audio_formats = []\nstream_modes = [\"non_streaming\"]\n"
+                "\n[[workers]]\nworker_id = \"{worker_id}\"\nbase_url = \"{base_url}\"\n{resolved_ip}trust_domain = \"local\"\ndefault_model_id = \"omni\"\nhealth_path = \"/health\"\n\n[workers.capacity]\ngeneration_http = {worker_capacity}\n\n[[workers.service_profiles]]\nservice = \"generation_http\"\nmodel_ids = [\"omni\"]\n{profile_fields}\noutput_modalities = [\"text\"]\nchat_audio_formats = []\nstream_modes = [\"non_streaming\"]\n"
             ));
         }
         fs::write(
             &config,
             format!(
-                "schema_version = 1\n\n[server]\nlisten = \"{address}\"\nmax_connections = 128\n\n[shutdown]\ndrain_timeout_ms = 2000\n\n[logging]\nformat = \"json\"\nfilter = \"info\"\n\n[router]\nstrategy = \"round_robin\"\n\n[admission]\nglobal = {global}\ngeneration_http = {global}\n\n[health]\ninterval_ms = 100\ntimeout_ms = 50\nsuccess_threshold = 1\nfailure_threshold = 1\nmax_concurrent_probes = 2\n\n[http_generation]\ntrust_domain = \"local\"\nstreamed_request_max_bytes = 1048576\nconnect_timeout_ms = 100\nrequest_timeout_ms = {timeout_ms}\npool_idle_timeout_ms = 30000\npool_max_idle_per_host = 8\n{worker_config}"
+                "schema_version = 1\n\n[server]\nlisten = \"{address}\"\nmax_connections = 128\n\n[shutdown]\ndrain_timeout_ms = 2000\n\n[logging]\nformat = \"json\"\nfilter = \"info\"\n\n[router]\nstrategy = \"{strategy}\"\n\n[admission]\nglobal = {global}\ngeneration_http = {global}\n\n[health]\ninterval_ms = 100\ntimeout_ms = 50\nsuccess_threshold = 1\nfailure_threshold = 1\nmax_concurrent_probes = 2\n\n[http_generation]\ntrust_domain = \"local\"\nstreamed_request_max_bytes = 1048576\nconnect_timeout_ms = 100\nrequest_timeout_ms = {timeout_ms}\npool_idle_timeout_ms = 30000\npool_max_idle_per_host = 8\n{worker_config}"
             ),
         )
         .expect("write router config");
@@ -495,6 +514,21 @@ fn post(address: SocketAddr, body: &[u8], request_id: Option<&str>) -> Vec<u8> {
     let mut request = head.into_bytes();
     request.extend_from_slice(body);
     raw_request(address, &request).expect("complete routed request")
+}
+
+fn post_when_capacity_releases(address: SocketAddr) -> Vec<u8> {
+    let deadline = Instant::now() + DEADLINE;
+    loop {
+        let response = post(address, b"{}", None);
+        if status(&response) != 429 {
+            return response;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "worker capacity remained reserved"
+        );
+        thread::sleep(Duration::from_millis(2));
+    }
 }
 
 fn status(response: &[u8]) -> u16 {
@@ -759,6 +793,49 @@ fn homogeneous_replicas_rotate_and_unhealthy_workers_are_filtered() {
 }
 
 #[test]
+fn worker_capacity_is_independent_from_global_admission() {
+    let worker = Worker::start();
+    let router = RouterProcess::start_configured(
+        &[("worker-a", worker.address, false, GenerationProfile::Text)],
+        2,
+        1,
+        2_000,
+        "round_robin",
+    );
+
+    let address = router.address;
+    let slow = thread::spawn(move || post(address, b"slow", None));
+    worker.wait_for_requests(1);
+    assert_eq!(status(&post(router.address, b"{}", None)), 429);
+    assert_eq!(status(&slow.join().expect("join slow client")), 200);
+}
+
+#[test]
+fn least_requests_prefers_the_less_occupied_replica() {
+    let (first, second) = Worker::start_pair();
+    let router = RouterProcess::start_configured(
+        &[
+            ("worker-a", first.address, false, GenerationProfile::Text),
+            ("worker-b", second.address, false, GenerationProfile::Text),
+        ],
+        4,
+        2,
+        2_000,
+        "least_requests",
+    );
+
+    let address = router.address;
+    let slow = thread::spawn(move || post(address, b"slow", None));
+    first.wait_for_requests(1);
+    assert_eq!(status(&post(router.address, b"{}", None)), 200);
+    assert_eq!(status(&post(router.address, b"{}", None)), 200);
+    second.wait_for_requests(2);
+    assert_eq!(first.captures().len(), 1);
+    assert_eq!(second.captures().len(), 2);
+    assert_eq!(status(&slow.join().expect("join slow client")), 200);
+}
+
+#[test]
 fn precommit_timeout_and_upstream_reset_are_bounded_and_release_admission() {
     let worker = Worker::start();
     let router = RouterProcess::start(worker.address, 1, 500, false);
@@ -771,8 +848,7 @@ fn precommit_timeout_and_upstream_reset_are_bounded_and_release_admission() {
         String::from_utf8_lossy(&timeout),
         worker.captures()
     );
-    thread::sleep(Duration::from_millis(1_000));
-    let recovered = post(router.address, b"{}", None);
+    let recovered = post_when_capacity_releases(router.address);
     assert_ne!(
         status(&recovered),
         429,
@@ -825,8 +901,7 @@ fn early_upload_eof_and_downstream_disconnect_release_admission() {
     assert_ne!(count, 0);
     drop(disconnect);
 
-    thread::sleep(Duration::from_millis(50));
-    let released = post(router.address, b"{}", None);
+    let released = post_when_capacity_releases(router.address);
     assert_ne!(
         status(&released),
         429,
@@ -859,4 +934,38 @@ fn early_upstream_response_is_relayed_before_upload_completion() {
             .windows(b"early".len())
             .any(|part| part == b"early")
     );
+}
+
+#[test]
+fn upstream_failure_after_sse_commitment_releases_capacity() {
+    let worker = Worker::start();
+    let router = RouterProcess::start(worker.address, 1, 2_000, false);
+
+    let response = post(router.address, b"mid-body-reset", None);
+    assert_eq!(status(&response), 200);
+    assert!(response.windows(9).any(|part| part == b"data: one"));
+    assert!(!response.windows(6).any(|part| part == b"[DONE]"));
+
+    let recovered = post_when_capacity_releases(router.address);
+    assert_ne!(status(&recovered), 429);
+}
+
+#[test]
+fn graceful_drain_waits_for_a_committed_relay() {
+    let worker = Worker::start();
+    let mut router = RouterProcess::start(worker.address, 1, 2_000, false);
+    let address = router.address;
+    let slow = thread::spawn(move || post(address, b"slow", None));
+    worker.wait_for_requests(1);
+
+    let signaled = Command::new("kill")
+        .arg("-TERM")
+        .arg(router.child.id().to_string())
+        .status()
+        .expect("signal router");
+    assert!(signaled.success());
+    let response = slow.join().expect("join draining relay");
+    assert_eq!(status(&response), 200);
+    assert!(response.windows(6).any(|part| part == b"[DONE]"));
+    assert!(router.child.wait().expect("wait for router").success());
 }
