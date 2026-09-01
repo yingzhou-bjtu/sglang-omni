@@ -102,13 +102,7 @@ async fn relay_direct(
     deadline: tokio::time::Instant,
 ) -> Result<Response<Body>, HttpFault> {
     let state: SharedUploadState = Arc::new(Mutex::new(UploadState::Incomplete));
-    let direct = DirectRequestBody::new(
-        body,
-        length,
-        generation.streamed_max,
-        Arc::clone(&state),
-        deadline,
-    );
+    let direct = DirectRequestBody::new(body, length, Arc::clone(&state), deadline);
     send_once(
         generation,
         OutgoingBody {
@@ -274,7 +268,6 @@ const fn map_admission(error: AdmissionError) -> HttpFault {
 
 const fn map_dispatch(error: DispatchError) -> HttpFault {
     match error {
-        DispatchError::NoEligibleProfile => HttpFault::NoCompatibleWorker,
         DispatchError::Unavailable | DispatchError::Draining => HttpFault::RouterUnavailable,
         DispatchError::Overloaded => HttpFault::RouterOverloaded,
         DispatchError::Internal => HttpFault::InternalError,

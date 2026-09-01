@@ -29,7 +29,7 @@ struct CapacitySlot {
     semaphore: Arc<Semaphore>,
 }
 
-/// One immutable startup registration with independently updated health and
+/// One static startup registration with independently updated health and
 /// exact generation-capacity ownership.
 pub(super) struct WorkerRecord {
     worker_id: WorkerId,
@@ -53,7 +53,7 @@ impl WorkerRecord {
     }
 }
 
-/// Immutable generation worker pool with bounded admission, exact capacity,
+/// Static-membership generation worker pool with bounded admission, exact capacity,
 /// deterministic policy state, and independently owned health.
 pub(crate) struct WorkerPool {
     records: Vec<Arc<WorkerRecord>>,
@@ -156,12 +156,8 @@ impl WorkerPool {
     fn dispatch_matching(
         &self,
         admission: AdmissionLease,
-        profile_found: bool,
         matches: impl Fn(&WorkerRecord) -> bool,
     ) -> Result<RequestLease, DispatchError> {
-        if !profile_found {
-            return Err(DispatchError::NoEligibleProfile);
-        }
         let eligible_count = self
             .records
             .iter()
@@ -236,7 +232,7 @@ impl WorkerPool {
         let mut attempted = [false; MAX_WORKERS];
         for (index, record) in self.records.iter().enumerate() {
             if matches(record) && record.is_routable() {
-                *snapshots.get_mut(index)? = record.occupancy_snapshot();
+                snapshots[index] = record.occupancy_snapshot();
             }
         }
         for _ in 0..self.records.len() {
@@ -247,10 +243,10 @@ impl WorkerPool {
                 .enumerate()
                 .take(self.records.len())
             {
-                if occupancy == usize::MAX || attempted.get(index).is_none_or(|value| *value) {
+                if occupancy == usize::MAX || attempted[index] {
                     continue;
                 }
-                let ordinal = self.records.get(index)?.registration_id.startup_ordinal();
+                let ordinal = self.records[index].registration_id.startup_ordinal();
                 let rank = if ordinal >= start {
                     ordinal - start
                 } else {
@@ -264,8 +260,8 @@ impl WorkerPool {
                 }
             }
             let (index, _, _) = best?;
-            *attempted.get_mut(index)? = true;
-            let record = self.records.get(index)?;
+            attempted[index] = true;
+            let record = &self.records[index];
             if let Ok(exact) = Arc::clone(&record.capacity.semaphore).try_acquire_owned() {
                 return Some((Arc::clone(record), exact));
             }
@@ -313,7 +309,7 @@ impl WorkerPool {
 impl ContentBlindGenerationHttp<'_> {
     pub(crate) fn dispatch(self, admission: AdmissionLease) -> Result<RequestLease, DispatchError> {
         self.pool
-            .dispatch_matching(admission, true, |record| &record.trust_domain == self.trust)
+            .dispatch_matching(admission, |record| &record.trust_domain == self.trust)
     }
 }
 

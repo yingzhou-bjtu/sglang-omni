@@ -28,10 +28,10 @@ pub(crate) struct UploadError;
 pub(crate) struct DirectRequestBody {
     inner: SyncWrapper<Body>,
     expected: u64,
-    maximum: u64,
     observed: u64,
     final_frame_returned: bool,
     state: SharedUploadState,
+    /// Bounds upload polling after an upstream response commits before the request finishes.
     deadline: Pin<Box<Sleep>>,
     terminal: bool,
 }
@@ -40,14 +40,12 @@ impl DirectRequestBody {
     pub(crate) fn new(
         body: Body,
         expected: u64,
-        maximum: u64,
         state: SharedUploadState,
         deadline: tokio::time::Instant,
     ) -> Self {
         Self {
             inner: SyncWrapper::new(body),
             expected,
-            maximum,
             observed: 0,
             final_frame_returned: false,
             state,
@@ -98,7 +96,7 @@ impl http_body::Body for DirectRequestBody {
                     let Some(observed) = self.observed.checked_add(length) else {
                         return self.fail(HttpFault::RequestBodyTooLarge);
                     };
-                    if observed > self.expected || observed > self.maximum {
+                    if observed > self.expected {
                         return self.fail(HttpFault::RequestBodyTooLarge);
                     }
                     self.observed = observed;
@@ -226,7 +224,6 @@ mod tests {
         let mut direct = DirectRequestBody::new(
             body,
             expected,
-            64,
             Arc::clone(&state),
             tokio::time::Instant::now() + Duration::from_secs(1),
         );
@@ -279,7 +276,6 @@ mod tests {
         let mut direct = DirectRequestBody::new(
             Body::new(Pending),
             1,
-            1,
             Arc::clone(&state),
             tokio::time::Instant::now(),
         );
@@ -294,7 +290,6 @@ mod tests {
         let mut ready = DirectRequestBody::new(
             Body::new(AlwaysReady),
             4,
-            64,
             Arc::clone(&ready_state),
             tokio::time::Instant::now(),
         );
@@ -323,7 +318,6 @@ mod tests {
                 polls: Arc::clone(&polls),
             }),
             2,
-            64,
             Arc::clone(&state),
             tokio::time::Instant::now() + Duration::from_secs(1),
         );
@@ -361,7 +355,6 @@ mod tests {
         let mut empty = DirectRequestBody::new(
             Body::new(empty_frames),
             0,
-            64,
             Arc::clone(&empty_state),
             tokio::time::Instant::now() + Duration::from_secs(1),
         );
@@ -414,7 +407,6 @@ mod tests {
             let state = Arc::new(Mutex::new(UploadState::Incomplete));
             let body = DirectRequestBody::new(
                 Body::from("{}"),
-                2,
                 2,
                 state,
                 tokio::time::Instant::now() + Duration::from_secs(1),

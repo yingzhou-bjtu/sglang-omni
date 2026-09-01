@@ -57,7 +57,6 @@ impl ResolvedTarget {
             || base_url.query().is_some()
             || base_url.fragment().is_some()
             || base_url.path() != "/"
-            || base_url.port() == Some(0)
         {
             return None;
         }
@@ -67,19 +66,12 @@ impl ResolvedTarget {
             (Some(authority), Some(resolved)) if authority == resolved => {
                 (CanonicalHost::Ip, authority)
             }
-            (None, Some(ip))
-                if host.is_ascii()
-                    && !host.ends_with('.')
-                    && !host.bytes().any(|byte| byte.is_ascii_uppercase()) =>
-            {
+            (None, Some(ip)) if host.is_ascii() && !host.ends_with('.') => {
                 (CanonicalHost::Domain(host.to_owned()), ip)
             }
             _ => return None,
         };
         let effective_port = base_url.port_or_known_default()?;
-        if effective_port == 0 {
-            return None;
-        }
         let mut health_url = base_url.clone();
         health_url.set_path(health_path);
         let socket_addr = SocketAddr::new(transport_ip, effective_port);
@@ -198,6 +190,7 @@ pub(super) fn build_generation_client(
     pool_idle_timeout: Duration,
     pool_max_idle_per_host: usize,
 ) -> Result<Client, reqwest::Error> {
+    // A total or read timeout would terminate a valid stream after response commitment.
     Client::builder()
         .dns_resolver(resolver)
         .no_proxy()
