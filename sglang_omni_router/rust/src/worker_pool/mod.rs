@@ -17,7 +17,10 @@ pub(crate) use resolver::ResolvedTarget;
 
 use admission::{AdmissionController, AdmissionGate};
 use health::AtomicHealth;
-use profile::{MAX_WORKERS, RegistrationId, ServiceProfile, WorkerCapacityConfig, WorkerId};
+use profile::{
+    MAX_WORKERS, RegistrationId, ServiceProfile, WorkerCapacityConfig, WorkerId,
+    generation_cohort_is_homogeneous,
+};
 use resolver::{StaticResolver, build_generation_client, build_health_client};
 use selection::Selector;
 
@@ -325,29 +328,22 @@ fn build_content_blind_generation_cohorts(
         {
             continue;
         }
-        let mut members = records
+        let members = records
             .iter()
-            .filter(|candidate| candidate.trust_domain == record.trust_domain);
-        let Some(first) = members.next() else {
-            continue;
-        };
-        if members.all(|candidate| {
-            candidate.default_model_id == first.default_model_id
-                && generation_rows_equal(&candidate.profiles, &first.profiles)
-        }) {
+            .filter(|candidate| candidate.trust_domain == record.trust_domain)
+            .map(|candidate| {
+                (
+                    candidate.default_model_id.as_str(),
+                    candidate.profiles.as_slice(),
+                )
+            });
+        if generation_cohort_is_homogeneous(members) {
             result.push(HomogeneousGenerationCohort {
                 trust_domain: record.trust_domain.clone(),
             });
         }
     }
     result
-}
-
-fn generation_rows_equal(left: &[ServiceProfile], right: &[ServiceProfile]) -> bool {
-    left.len() == right.len()
-        && left
-            .iter()
-            .all(|profile| right.iter().any(|other| profile.semantically_eq(other)))
 }
 
 fn build_capacity(

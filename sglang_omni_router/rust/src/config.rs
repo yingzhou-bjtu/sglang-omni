@@ -6,7 +6,9 @@ use std::time::Duration;
 use serde::Deserialize;
 
 use crate::error::ConfigError;
-use crate::worker_pool::profile::{WorkerConfig, validate_workers};
+use crate::worker_pool::profile::{
+    WorkerConfig, generation_cohort_is_homogeneous, validate_identifier, validate_workers,
+};
 
 const DEFAULT_BUFFERED_REQUEST_MAX_BYTES: u64 = 8_388_608;
 const DEFAULT_BUFFERED_REQUEST_TOTAL_BYTES: u64 = 268_435_456;
@@ -306,19 +308,14 @@ impl Config {
         self.validate_router()?;
         self.validate_admission()?;
         self.validate_health()?;
-        self.validate_http_generation()?;
         validate_workers(&self.workers)?;
+        self.validate_http_generation()?;
         Ok(())
     }
 
     fn validate_http_generation(&self) -> Result<(), ConfigError> {
         let generation = &self.http_generation;
-        if generation.trust_domain.is_empty() || generation.trust_domain.len() > 128 {
-            return Err(ConfigError::invalid(
-                "http_generation.trust_domain",
-                "must contain between 1 and 128 bytes",
-            ));
-        }
+        validate_identifier(&generation.trust_domain, "http_generation.trust_domain")?;
         if !(1..=67_108_864).contains(&generation.buffered_request_max_bytes) {
             return Err(ConfigError::invalid(
                 "http_generation.buffered_request_max_bytes",
@@ -375,18 +372,20 @@ impl Config {
                 "must be between 1 and 1024",
             ));
         }
-        if !self.workers.iter().any(|worker| {
-            worker.trust_domain == generation.trust_domain
-                && worker.service_profiles.iter().any(|profile| {
-                    matches!(
-                        profile,
-                        crate::worker_pool::profile::ServiceProfile::GenerationHttp { .. }
-                    )
-                })
-        }) {
+        let members = self
+            .workers
+            .iter()
+            .filter(|worker| worker.trust_domain == generation.trust_domain)
+            .map(|worker| {
+                (
+                    worker.default_model_id.as_str(),
+                    worker.service_profiles.as_slice(),
+                )
+            });
+        if !generation_cohort_is_homogeneous(members) {
             return Err(ConfigError::invalid(
                 "http_generation.trust_domain",
-                "must contain at least one generation worker",
+                "must identify a homogeneous generation worker cohort",
             ));
         }
         Ok(())

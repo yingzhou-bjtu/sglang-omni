@@ -323,6 +323,25 @@ pub(crate) fn validate_workers(workers: &[WorkerConfig]) -> Result<(), ConfigErr
     Ok(())
 }
 
+pub(crate) fn generation_cohort_is_homogeneous<'a>(
+    mut members: impl Iterator<Item = (&'a str, &'a [ServiceProfile])>,
+) -> bool {
+    let Some((default_model_id, profiles)) = members.next() else {
+        return false;
+    };
+    members.all(|(candidate_model_id, candidate_profiles)| {
+        candidate_model_id == default_model_id
+            && generation_rows_equal(candidate_profiles, profiles)
+    })
+}
+
+fn generation_rows_equal(left: &[ServiceProfile], right: &[ServiceProfile]) -> bool {
+    left.len() == right.len()
+        && left
+            .iter()
+            .all(|profile| right.iter().any(|other| profile.semantically_eq(other)))
+}
+
 fn validate_models(values: &[String]) -> Result<(), ConfigError> {
     if values.is_empty()
         || values.len() > MAX_SET_ITEMS
@@ -362,7 +381,7 @@ fn set_eq<T: Eq>(left: &[T], right: &[T]) -> bool {
     left.len() == right.len() && left.iter().all(|item| right.contains(item))
 }
 
-fn validate_identifier(value: &str, field: &'static str) -> Result<(), ConfigError> {
+pub(crate) fn validate_identifier(value: &str, field: &'static str) -> Result<(), ConfigError> {
     if value.is_empty()
         || value.len() > MAX_ID_BYTES
         || !value

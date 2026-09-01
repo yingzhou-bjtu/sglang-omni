@@ -61,6 +61,16 @@ fn load_bytes(contents: &[u8]) -> Result<Config, ConfigError> {
     Config::load(&directory.write(contents))
 }
 
+fn append_worker(base: &str, worker_id: &str, port: u16) -> String {
+    let (_, worker) = base
+        .split_once("[[workers]]")
+        .expect("valid fixture contains a worker");
+    let worker = format!("[[workers]]{worker}")
+        .replace("worker-a", worker_id)
+        .replace("127.0.0.1:8000", &format!("127.0.0.1:{port}"));
+    format!("{base}\n{worker}")
+}
+
 #[test]
 fn omitted_server_limits_use_bounded_defaults() {
     let config = load_bytes(valid_config("127.0.0.1:30000", 30_000, "info").as_bytes())
@@ -242,6 +252,66 @@ fn routing_schema_rejects_unknowns_invalid_bounds_and_profile_counterexamples() 
     for contents in cases {
         assert!(load_bytes(contents.as_bytes()).is_err());
     }
+}
+
+#[test]
+fn content_blind_route_requires_a_homogeneous_worker_cohort() {
+    let base = valid_config("127.0.0.1:30000", 30_000, "info");
+    let two_workers = append_worker(&base, "worker-b", 8001);
+    assert!(load_bytes(two_workers.as_bytes()).is_ok());
+
+    let different_model = two_workers.replacen(
+        "default_model_id = \"omni\"",
+        "default_model_id = \"other\"",
+        1,
+    );
+    let different_model =
+        different_model.replacen("model_ids = [\"omni\"]", "model_ids = [\"other\"]", 1);
+    let error = load_bytes(different_model.as_bytes())
+        .expect_err("different default models must reject content-blind routing");
+    assert!(matches!(
+        error,
+        ConfigError::InvalidField {
+            field: "http_generation.trust_domain",
+            ..
+        }
+    ));
+
+    let different_profile = two_workers.replacen(
+        "input_modalities = [\"text\"]",
+        "input_modalities = [\"text\", \"audio\"]",
+        1,
+    );
+    assert!(load_bytes(different_profile.as_bytes()).is_err());
+}
+
+#[test]
+fn worker_fields_are_validated_before_route_cross_checks() {
+    let invalid_worker = valid_config("127.0.0.1:30000", 30_000, "info").replace(
+        "trust_domain = \"local\"\ndefault_model_id",
+        "trust_domain = \"bad domain\"\ndefault_model_id",
+    );
+    let error = load_bytes(invalid_worker.as_bytes()).expect_err("invalid worker label must fail");
+    assert!(matches!(
+        error,
+        ConfigError::InvalidField {
+            field: "workers.trust_domain",
+            ..
+        }
+    ));
+
+    let invalid_route = valid_config("127.0.0.1:30000", 30_000, "info").replace(
+        "trust_domain = \"local\"\nbuffered_request_max_bytes",
+        "trust_domain = \"local \"\nbuffered_request_max_bytes",
+    );
+    let error = load_bytes(invalid_route.as_bytes()).expect_err("invalid route label must fail");
+    assert!(matches!(
+        error,
+        ConfigError::InvalidField {
+            field: "http_generation.trust_domain",
+            ..
+        }
+    ));
 }
 
 #[test]
