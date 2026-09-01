@@ -141,7 +141,7 @@ impl Default for HealthConfig {
     fn default() -> Self {
         Self {
             interval_ms: 5_000,
-            timeout_ms: 1_000,
+            timeout_ms: 5_000,
             success_threshold: 2,
             failure_threshold: 3,
             max_concurrent_probes: 16,
