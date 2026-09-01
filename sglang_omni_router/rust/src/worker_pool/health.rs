@@ -2,7 +2,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
 
-use thiserror::Error;
 use tokio::sync::{Semaphore, watch};
 use tokio::task::{JoinError, JoinSet};
 
@@ -45,17 +44,9 @@ impl AtomicHealth {
     }
 }
 
-#[derive(Debug, Error)]
-pub(crate) enum HealthTaskError {
-    #[error("health cancellation owner disappeared")]
-    CancellationOwner,
-    #[error("health probe semaphore closed unexpectedly")]
-    ProbeBudgetClosed,
-}
-
 pub(crate) struct HealthSupervisor {
     shutdown: watch::Sender<bool>,
-    tasks: JoinSet<Result<(), HealthTaskError>>,
+    tasks: JoinSet<()>,
 }
 
 impl HealthSupervisor {
@@ -92,15 +83,30 @@ impl HealthSupervisor {
         self.tasks.is_empty()
     }
 
-    pub(crate) async fn join_next(
-        &mut self,
-    ) -> Option<Result<Result<(), HealthTaskError>, JoinError>> {
+    pub(crate) async fn join_next(&mut self) -> Option<Result<(), JoinError>> {
         self.tasks.join_next().await
     }
 
-    pub(crate) async fn abort_and_join_all(&mut self) {
+    pub(crate) async fn abort_and_join_all(&mut self) -> Vec<JoinError> {
         self.tasks.abort_all();
-        while self.tasks.join_next().await.is_some() {}
+        let mut failures = Vec::new();
+        while let Some(result) = self.tasks.join_next().await {
+            if let Err(source) = result
+                && !source.is_cancelled()
+            {
+                failures.push(source);
+            }
+        }
+        failures
+    }
+
+    #[cfg(test)]
+    pub(crate) fn empty() -> Self {
+        let (shutdown, _receiver) = watch::channel(false);
+        Self {
+            shutdown,
+            tasks: JoinSet::new(),
+        }
     }
 }
 
@@ -112,7 +118,7 @@ async fn run_worker_health(
     interval: Duration,
     success_threshold: u8,
     failure_threshold: u8,
-) -> Result<(), HealthTaskError> {
+) {
     let mut ticker = tokio::time::interval(interval);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut tracker = ProbeTracker::new(success_threshold, failure_threshold);
@@ -122,9 +128,9 @@ async fn run_worker_health(
             biased;
             changed = shutdown.changed() => {
                 match changed {
-                    Ok(()) if *shutdown.borrow() => return Ok(()),
+                    Ok(()) if *shutdown.borrow() => return,
                     Ok(()) => continue,
-                    Err(_) => return Err(HealthTaskError::CancellationOwner),
+                    Err(_) => return,
                 }
             }
             () = record.immediate_probe.notified() => {}
@@ -135,13 +141,16 @@ async fn run_worker_health(
             biased;
             changed = shutdown.changed() => {
                 match changed {
-                    Ok(()) if *shutdown.borrow() => return Ok(()),
+                    Ok(()) if *shutdown.borrow() => return,
                     Ok(()) => continue,
-                    Err(_) => return Err(HealthTaskError::CancellationOwner),
+                    Err(_) => return,
                 }
             }
             result = Arc::clone(&budget).acquire_owned() => {
-                result.map_err(|_| HealthTaskError::ProbeBudgetClosed)?
+                let Ok(permit) = result else {
+                    return;
+                };
+                permit
             }
         };
 
@@ -150,9 +159,9 @@ async fn run_worker_health(
             changed = shutdown.changed() => {
                 drop(permit);
                 match changed {
-                    Ok(()) if *shutdown.borrow() => return Ok(()),
+                    Ok(()) if *shutdown.borrow() => return,
                     Ok(()) => continue,
-                    Err(_) => return Err(HealthTaskError::CancellationOwner),
+                    Err(_) => return,
                 }
             }
             result = client.get(record.target.health_url().clone()).send() => {
@@ -315,7 +324,7 @@ mod tests {
         }
         assert_eq!(record.health.load(), WorkerHealth::Healthy);
         supervisor.cancel();
-        assert!(matches!(supervisor.join_next().await, Some(Ok(Ok(())))));
+        assert!(matches!(supervisor.join_next().await, Some(Ok(()))));
         server.join().expect("join health fixture server");
     }
 
@@ -347,7 +356,7 @@ mod tests {
         }
         assert_eq!(record.health.load(), WorkerHealth::Unhealthy);
         supervisor.cancel();
-        assert!(matches!(supervisor.join_next().await, Some(Ok(Ok(())))));
+        assert!(matches!(supervisor.join_next().await, Some(Ok(()))));
         server.join().expect("join timeout fixture server");
     }
 
@@ -383,7 +392,7 @@ mod tests {
         .await
         .expect("non-2xx observation must complete");
         supervisor.cancel();
-        assert!(matches!(supervisor.join_next().await, Some(Ok(Ok(())))));
+        assert!(matches!(supervisor.join_next().await, Some(Ok(()))));
         server.join().expect("join non-2xx fixture server");
     }
 
@@ -444,7 +453,7 @@ mod tests {
         let joined = tokio::time::timeout(Duration::from_millis(500), supervisor.join_next())
             .await
             .expect("stalled probe cancellation must be bounded");
-        assert!(matches!(joined, Some(Ok(Ok(())))));
+        assert!(matches!(joined, Some(Ok(()))));
         release.store(true, Ordering::Release);
         server.join().expect("join stalled fixture server");
         assert!(!overlap.load(Ordering::Acquire));
@@ -543,7 +552,7 @@ mod tests {
         server.join().expect("join coalescing health fixture");
         assert_eq!(count.load(Ordering::Acquire), 2);
         supervisor.cancel();
-        assert!(matches!(supervisor.join_next().await, Some(Ok(Ok(())))));
+        assert!(matches!(supervisor.join_next().await, Some(Ok(()))));
     }
 
     #[tokio::test]
@@ -612,7 +621,7 @@ mod tests {
         assert!(maximum.load(Ordering::Acquire) <= MAX_CONCURRENT);
         supervisor.cancel();
         while !supervisor.is_empty() {
-            assert!(matches!(supervisor.join_next().await, Some(Ok(Ok(())))));
+            assert!(matches!(supervisor.join_next().await, Some(Ok(()))));
         }
     }
 }

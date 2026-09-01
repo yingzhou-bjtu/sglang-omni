@@ -108,9 +108,12 @@ pub enum RouterError {
     /// Validated worker-pool configuration could not be reconstructed.
     #[error("the validated worker-pool invariant failed")]
     WorkerPoolInvariant,
-    /// A health worker exited before cancellation or failed during shutdown.
-    #[error("an owned health task failed")]
-    HealthTask,
+    /// A health worker returned before process cancellation.
+    #[error("an owned health task exited unexpectedly")]
+    HealthTaskExited,
+    /// A health worker panicked or otherwise failed to join.
+    #[error("an owned health task failed: {0}")]
+    HealthTask(#[source] tokio::task::JoinError),
 }
 
 impl RouterError {
@@ -134,7 +137,8 @@ impl RouterError {
             | Self::GenerationClient(_)
             | Self::HealthClient(_)
             | Self::WorkerPoolInvariant
-            | Self::HealthTask => 1,
+            | Self::HealthTaskExited
+            | Self::HealthTask(_) => 1,
         }
     }
 }

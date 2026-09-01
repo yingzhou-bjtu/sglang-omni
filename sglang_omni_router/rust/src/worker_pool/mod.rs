@@ -11,7 +11,7 @@ use tokio::sync::{Notify, Semaphore};
 use crate::config::{Config, RoutingStrategy};
 
 pub(crate) use admission::{AdmissionError, AdmissionLease, DispatchError, RequestLease};
-pub(crate) use health::{HealthSupervisor, HealthTaskError, WorkerHealth};
+pub(crate) use health::{HealthSupervisor, WorkerHealth};
 pub(crate) use profile::TrustDomain;
 pub(crate) use resolver::ResolvedTarget;
 

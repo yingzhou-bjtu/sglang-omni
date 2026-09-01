@@ -20,7 +20,7 @@ use crate::http_generation::{self, HttpGeneration};
 use crate::lifecycle::Lifecycle;
 use crate::request_id::{self, RequestIds};
 use crate::shutdown;
-use crate::worker_pool::{HealthSupervisor, HealthTaskError, WorkerPool};
+use crate::worker_pool::{HealthSupervisor, WorkerPool};
 
 mod bounded_listener;
 
@@ -72,37 +72,50 @@ pub(crate) async fn serve(config: Config) -> Result<(), RouterError> {
     let first_signal = tokio::select! {
         biased;
         task_result = &mut server_task => {
-            health.cancel();
-            health.abort_and_join_all().await;
-            lifecycle.enter_failed()?;
-            return unexpected_server_exit(task_result);
+            let cause = unexpected_server_exit(task_result);
+            return Err(finalize_failure(&lifecycle, None, &mut health, cause).await);
         }
         health_result = health.join_next(), if !health.is_empty() => {
-            abort_all(&mut server_task, &mut health).await?;
-            lifecycle.enter_failed()?;
-            return unexpected_health_exit(health_result);
+            let cause = unexpected_health_exit(health_result);
+            return Err(finalize_failure(
+                &lifecycle,
+                Some(&mut server_task),
+                &mut health,
+                cause,
+            ).await);
         }
         signal_result = signal_observer.next() => match signal_result {
             Ok(signal) => signal,
             Err(source) => {
-                abort_all(&mut server_task, &mut health).await?;
-                lifecycle.enter_failed()?;
-                return Err(RouterError::Signal(source));
+                return Err(finalize_failure(
+                    &lifecycle,
+                    Some(&mut server_task),
+                    &mut health,
+                    RouterError::Signal(source),
+                ).await);
             }
         },
     };
 
     if lifecycle.enter_draining().is_err() || pool.drain().is_err() {
-        abort_all(&mut server_task, &mut health).await?;
-        lifecycle.enter_failed()?;
-        return Err(RouterError::Lifecycle);
+        return Err(finalize_failure(
+            &lifecycle,
+            Some(&mut server_task),
+            &mut health,
+            RouterError::Lifecycle,
+        )
+        .await);
     }
     health.cancel();
     info!(state = "draining", reason = ?first_signal, "graceful shutdown started");
     if shutdown_sender.send(()).is_err() {
-        abort_all(&mut server_task, &mut health).await?;
-        lifecycle.enter_failed()?;
-        return Err(RouterError::ShutdownNotify);
+        return Err(finalize_failure(
+            &lifecycle,
+            Some(&mut server_task),
+            &mut health,
+            RouterError::ShutdownNotify,
+        )
+        .await);
     }
 
     let deadline = tokio::time::Instant::now() + config.shutdown.drain_timeout();
@@ -114,61 +127,61 @@ pub(crate) async fn serve(config: Config) -> Result<(), RouterError> {
                 match task_result {
                     Ok(Ok(())) => server_done = true,
                     Ok(Err(source)) => {
-                        health.abort_and_join_all().await;
-                        lifecycle.enter_failed()?;
-                        return Err(RouterError::Server(source));
+                        return Err(finalize_failure(
+                            &lifecycle,
+                            None,
+                            &mut health,
+                            RouterError::Server(source),
+                        ).await);
                     }
                     Err(source) => {
-                        health.abort_and_join_all().await;
-                        lifecycle.enter_failed()?;
-                        return Err(RouterError::ServerTask(source));
+                        return Err(finalize_failure(
+                            &lifecycle,
+                            None,
+                            &mut health,
+                            RouterError::ServerTask(source),
+                        ).await);
                     }
                 }
             }
             health_result = health.join_next(), if !health.is_empty() => {
-                if !expected_health_shutdown(health_result) {
-                    if !server_done {
-                        let server_result = abort_and_join_server(&mut server_task).await;
-                        health.abort_and_join_all().await;
-                        server_result?;
-                    } else {
-                        health.abort_and_join_all().await;
-                    }
-                    lifecycle.enter_failed()?;
-                    return Err(RouterError::HealthTask);
+                if !expected_health_shutdown(&health_result) {
+                    let cause = unexpected_health_exit(health_result);
+                    let server = (!server_done).then_some(&mut server_task);
+                    return Err(finalize_failure(&lifecycle, server, &mut health, cause).await);
                 }
             }
             second_signal = signal_observer.next() => {
                 let signal = match second_signal {
                     Ok(signal) => signal,
                     Err(source) => {
-                        if !server_done {
-                            let server_result = abort_and_join_server(&mut server_task).await;
-                            health.abort_and_join_all().await;
-                            server_result?;
-                        } else {
-                            health.abort_and_join_all().await;
-                        }
-                        lifecycle.enter_failed()?;
-                        return Err(RouterError::Signal(source));
+                        let server = (!server_done).then_some(&mut server_task);
+                        return Err(finalize_failure(
+                            &lifecycle,
+                            server,
+                            &mut health,
+                            RouterError::Signal(source),
+                        ).await);
                     }
                 };
                 error!(state = "draining", reason = ?signal, "second signal forced shutdown");
-                if !server_done {
-                    abort_and_join_server(&mut server_task).await?;
-                }
-                health.abort_and_join_all().await;
-                lifecycle.enter_failed()?;
-                return Err(RouterError::ForcedShutdown);
+                let server = (!server_done).then_some(&mut server_task);
+                return Err(finalize_failure(
+                    &lifecycle,
+                    server,
+                    &mut health,
+                    RouterError::ForcedShutdown,
+                ).await);
             }
             () = tokio::time::sleep_until(deadline) => {
                 error!(state = "draining", "graceful shutdown deadline elapsed");
-                if !server_done {
-                    abort_and_join_server(&mut server_task).await?;
-                }
-                health.abort_and_join_all().await;
-                lifecycle.enter_failed()?;
-                return Err(RouterError::DrainTimeout);
+                let server = (!server_done).then_some(&mut server_task);
+                return Err(finalize_failure(
+                    &lifecycle,
+                    server,
+                    &mut health,
+                    RouterError::DrainTimeout,
+                ).await);
             }
         }
     }
@@ -305,35 +318,45 @@ async fn reject_head() -> StatusCode {
 
 fn unexpected_server_exit(
     task_result: Result<Result<(), std::io::Error>, tokio::task::JoinError>,
-) -> Result<(), RouterError> {
+) -> RouterError {
     match task_result {
-        Ok(Ok(())) => Err(RouterError::Lifecycle),
-        Ok(Err(source)) => Err(RouterError::Server(source)),
-        Err(source) => Err(RouterError::ServerTask(source)),
+        Ok(Ok(())) => RouterError::Lifecycle,
+        Ok(Err(source)) => RouterError::Server(source),
+        Err(source) => RouterError::ServerTask(source),
     }
 }
 
-fn unexpected_health_exit(
-    result: Option<Result<Result<(), HealthTaskError>, tokio::task::JoinError>>,
-) -> Result<(), RouterError> {
-    let _result = result;
-    Err(RouterError::HealthTask)
+fn unexpected_health_exit(result: Option<Result<(), tokio::task::JoinError>>) -> RouterError {
+    match result {
+        Some(Ok(())) => RouterError::HealthTaskExited,
+        Some(Err(source)) => RouterError::HealthTask(source),
+        None => RouterError::Lifecycle,
+    }
 }
 
-fn expected_health_shutdown(
-    result: Option<Result<Result<(), HealthTaskError>, tokio::task::JoinError>>,
-) -> bool {
-    matches!(result, Some(Ok(Ok(()))))
+fn expected_health_shutdown(result: &Option<Result<(), tokio::task::JoinError>>) -> bool {
+    matches!(result, Some(Ok(())))
 }
 
-async fn abort_all(
-    server_task: &mut JoinHandle<std::io::Result<()>>,
+async fn finalize_failure(
+    lifecycle: &Lifecycle,
+    server_task: Option<&mut JoinHandle<std::io::Result<()>>>,
     health: &mut HealthSupervisor,
-) -> Result<(), RouterError> {
+    cause: RouterError,
+) -> RouterError {
     health.cancel();
-    let server_result = abort_and_join_server(server_task).await;
-    health.abort_and_join_all().await;
-    server_result
+    if let Some(server_task) = server_task
+        && let Err(cleanup) = abort_and_join_server(server_task).await
+    {
+        error!(primary = %cause, %cleanup, "server cleanup failed after primary failure");
+    }
+    for cleanup in health.abort_and_join_all().await {
+        error!(primary = %cause, %cleanup, "health cleanup failed after primary failure");
+    }
+    if let Err(cleanup) = lifecycle.enter_failed() {
+        error!(primary = %cause, %cleanup, "lifecycle finalization failed after primary failure");
+    }
+    cause
 }
 
 async fn abort_and_join_server(
@@ -364,9 +387,41 @@ mod tests {
     use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore, oneshot};
     use tokio::task::JoinHandle;
 
-    use super::{BoundedTcpListener, Router, serve_http};
+    use super::{BoundedTcpListener, Router, finalize_failure, serve_http, unexpected_health_exit};
+    use crate::error::RouterError;
+    use crate::lifecycle::Lifecycle;
+    use crate::worker_pool::HealthSupervisor;
 
     const TEST_TIMEOUT: Duration = Duration::from_millis(100);
+
+    #[tokio::test]
+    async fn failure_finalization_preserves_the_primary_cause() {
+        let lifecycle = Lifecycle::starting();
+        lifecycle.enter_serving().expect("enter serving state");
+        let mut health = HealthSupervisor::empty();
+        let mut server = tokio::spawn(async { Err(io::Error::other("secondary failure")) });
+        while !server.is_finished() {
+            tokio::task::yield_now().await;
+        }
+
+        let cause = finalize_failure(
+            &lifecycle,
+            Some(&mut server),
+            &mut health,
+            RouterError::DrainTimeout,
+        )
+        .await;
+
+        assert!(matches!(cause, RouterError::DrainTimeout));
+        assert!(!lifecycle.is_live());
+    }
+
+    #[tokio::test]
+    async fn health_task_failure_retains_its_join_error() {
+        let result = tokio::spawn(async { panic!("health task failure") }).await;
+        let cause = unexpected_health_exit(Some(result));
+        assert!(matches!(cause, RouterError::HealthTask(source) if source.is_panic()));
+    }
 
     async fn start(
         app: Router,
