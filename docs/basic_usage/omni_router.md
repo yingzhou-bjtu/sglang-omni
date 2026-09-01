@@ -174,9 +174,10 @@ expected workload and worker topology.
 | `GET` | `/diagnostics` | Bounded router state |
 
 Generation requests use HTTP/1.1, JSON content type, no query string, and one
-valid `Content-Length`. Ambiguous framing, transfer encoding, trailers,
-expectations, content encoding, and oversized uploads are rejected before
-dispatch.
+valid `Content-Length`. A single `Expect: 100-continue` is handled by the
+client connection and is not forwarded upstream. Ambiguous framing, transfer
+encoding, trailers, other expectations, content encoding, and oversized
+uploads are rejected before dispatch.
 
 A canonical `x-request-id` identifies each request. A valid caller value is
 preserved; otherwise the router generates one. The same value is sent to the
@@ -214,7 +215,8 @@ concurrency to choose between the supported policies.
 
 Global and per-service admission are fail-fast. One request owns its admission
 and worker-capacity leases until response EOF, upstream error, or downstream
-cancellation.
+cancellation. A per-service admission limit below the sum of matching worker
+capacities intentionally caps the complete pool.
 
 The router sends one upstream request through a shared HTTP/1.1 connection
 pool. Redirects, ambient proxies, retries, and automatic decompression are
