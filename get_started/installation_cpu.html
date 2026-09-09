@@ -8,7 +8,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>🚀 Installation &#8212; SGLang</title>
+    <title>🚀 Installation — Intel CPU &#8212; SGLang</title>
   
   
   
@@ -49,15 +49,15 @@
     <script src="../_static/copybutton.js?v=ccdb6887"></script>
     <script src="../_static/scripts/sphinx-book-theme.js?v=fab101a9"></script>
     <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
-    <script>DOCUMENTATION_OPTIONS.pagename = 'get_started/installation';</script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'get_started/installation_cpu';</script>
     <script>DOCUMENTATION_OPTIONS.search_as_you_type = false;</script>
     <script src="../_static/js/qwen3_omni_server_generator.js?v=d7738e8a"></script>
     <script src="../_static/js/ming_omni_server_generator.js?v=7979a72f"></script>
     <link rel="icon" href="../_static/logo.ico"/>
     <link rel="index" title="Index" href="../genindex.html" />
     <link rel="search" title="Search" href="../search.html" />
-    <link rel="next" title="Installation — Ascend NPU" href="installation_npu.html" />
-    <link rel="prev" title="SGLang-Omni" href="../index.html" />
+    <link rel="next" title="Higgs TTS" href="../cookbook/higgs_tts.html" />
+    <link rel="prev" title="🚀 Installation — Intel XPU" href="installation_xpu.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
   <meta name="docsearch:version" content="0.1.4" />
@@ -206,10 +206,10 @@
     <div class="bd-toc-item navbar-nav active">
         <p aria-level="2" class="caption" role="heading"><span class="caption-text">Get Started</span></p>
 <ul class="current nav bd-sidenav">
-<li class="toctree-l1 current active"><a class="current reference internal" href="#">🚀 Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="installation.html">🚀 Installation</a></li>
 <li class="toctree-l1"><a class="reference internal" href="installation_npu.html">Installation — Ascend NPU</a></li>
 <li class="toctree-l1"><a class="reference internal" href="installation_xpu.html">🚀 Installation — Intel XPU</a></li>
-<li class="toctree-l1"><a class="reference internal" href="installation_cpu.html">🚀 Installation — Intel CPU</a></li>
+<li class="toctree-l1 current active"><a class="current reference internal" href="#">🚀 Installation — Intel CPU</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Cookbook</span></p>
 <ul class="nav bd-sidenav">
@@ -336,7 +336,7 @@
       
       
       
-      <li><a href="https://github.com/sgl-project/sglang-omni/blob/main/docs/get_started/installation.md?plain=1" target="_blank"
+      <li><a href="https://github.com/sgl-project/sglang-omni/blob/main/docs/get_started/installation_cpu.md?plain=1" target="_blank"
    class="btn btn-sm btn-source-file-button dropdown-item"
    title="Show source"
    data-bs-placement="left" data-bs-toggle="tooltip"
@@ -353,7 +353,7 @@
       
       
       
-      <li><a href="https://github.com/sgl-project/sglang-omni/edit/main/docs/get_started/installation.md" target="_blank"
+      <li><a href="https://github.com/sgl-project/sglang-omni/edit/main/docs/get_started/installation_cpu.md" target="_blank"
    class="btn btn-sm btn-source-edit-button dropdown-item"
    title="Suggest edit"
    data-bs-placement="left" data-bs-toggle="tooltip"
@@ -370,7 +370,7 @@
       
       
       
-      <li><a href="https://github.com/sgl-project/sglang-omni/issues/new?title=Issue%20on%20page%20%2Fget_started/installation.html&body=Your%20issue%20content%20here." target="_blank"
+      <li><a href="https://github.com/sgl-project/sglang-omni/issues/new?title=Issue%20on%20page%20%2Fget_started/installation_cpu.html&body=Your%20issue%20content%20here." target="_blank"
    class="btn btn-sm btn-source-issues-button dropdown-item"
    title="Open an issue"
    data-bs-placement="left" data-bs-toggle="tooltip"
@@ -400,7 +400,7 @@
       
       
       
-      <li><a href="../_sources/get_started/installation.md" target="_blank"
+      <li><a href="../_sources/get_started/installation_cpu.md" target="_blank"
    class="btn btn-sm btn-download-source-button dropdown-item"
    title="Download source file"
    data-bs-placement="left" data-bs-toggle="tooltip"
@@ -483,7 +483,7 @@
               
 
 <div id="jb-print-docs-body" class="onlyprint">
-    <h1>🚀 Installation</h1>
+    <h1>🚀 Installation — Intel CPU</h1>
     <!-- Table of contents -->
     <div id="print-main-content">
         <div id="jb-print-toc">
@@ -493,13 +493,12 @@
             </div>
             <nav aria-label="Page">
                 <ul class="pst-show_toc_level nav section-nav flex-column">
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#option-a-docker-recommended">🐳 Option A: Docker (recommended)</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#option-b-macos-apple-silicon-installer">🍎 Option B: macOS Apple Silicon installer</a><ul class="pst-show_toc_level nav section-nav flex-column">
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#run-from-a-hosted-installer">Run from a hosted installer</a></li>
-</ul>
-</li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#option-c-manual-install">🛠️ Option C: Manual install</a><ul class="pst-show_toc_level nav section-nav flex-column">
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#install-from-source">Install from source</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#why-a-separate-pyproject">Why a separate pyproject</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#prerequisites">Prerequisites</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#option-a-docker">🐳 Option A: Docker</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#option-b-manual-install">🛠️ Option B: Manual install</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#verify">Verify</a><ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#audio-decoding-fails-with-libtorchcodec-core-so">Audio decoding fails with <code class="docutils literal notranslate"><span class="pre">libtorchcodec_core*.so</span></code></a></li>
 </ul>
 </li>
 </ul>
@@ -513,144 +512,103 @@
 <div id="searchbox"></div>
                 <article class="bd-article">
                   
-  <section class="tex2jax_ignore mathjax_ignore" id="installation">
-<h1>🚀 Installation<a class="headerlink" href="#installation" title="Link to this heading">#</a></h1>
-<p>Current stable release: <strong>v0.1.4</strong> on <a class="reference external" href="https://pypi.org/project/sglang-omni/">PyPI</a>.</p>
-<p>Choose the path for your platform. Docker is recommended for NVIDIA CUDA —
-UCX, flash-attn, SGLang, and CUDA are prebuilt. Apple Silicon has a dedicated
-source installer below.</p>
+  <section class="tex2jax_ignore mathjax_ignore" id="installation-intel-cpu">
+<h1>🚀 Installation — Intel CPU<a class="headerlink" href="#installation-intel-cpu" title="Link to this heading">#</a></h1>
+<p>Installs <code class="docutils literal notranslate"><span class="pre">sglang-omni</span></code> for <strong>CPU-only inference</strong>. The default
+<a class="reference internal" href="installation.html"><span class="std std-doc">installation</span></a> targets CUDA, so this path uses the separate
+<a class="reference download internal" download="" href="../_downloads/959ec2b004cde39ac406608c01e9684b/pyproject_cpu.toml"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">pyproject_cpu.toml</span></code></span></a> and the PyTorch CPU wheel index.</p>
 <blockquote>
-<div><p><strong>Intel GPU (XPU)?</strong> For Intel Arc GPUs, see <a class="reference internal" href="installation_xpu.html"><span class="std std-doc">Installation — Intel XPU</span></a>, which uses <a class="reference download internal" download="" href="../_downloads/e6282636738987ea324fd398b24bcb06/pyproject_xpu.toml"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">pyproject_xpu.toml</span></code></span></a> + the PyTorch XPU wheel index instead of the CUDA-only pins below.</p>
+<div><p><strong><code class="docutils literal notranslate"><span class="pre">--no-build-isolation</span></code> is required</strong> for the editable <code class="docutils literal notranslate"><span class="pre">sglang-omni</span></code> install.</p>
 </div></blockquote>
-<blockquote>
-<div><p><strong>Intel CPU?</strong> Also not this page. See <a class="reference internal" href="installation_cpu.html"><span class="std std-doc">Installation — Intel CPU</span></a>, which uses <a class="reference download internal" download="" href="../_downloads/959ec2b004cde39ac406608c01e9684b/pyproject_cpu.toml"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">pyproject_cpu.toml</span></code></span></a> + the PyTorch CPU wheel index.</p>
-</div></blockquote>
-<blockquote>
-<div><p><strong>Ascend NPU?</strong> See <a class="reference internal" href="installation_npu.html"><span class="std std-doc">Installation — Ascend NPU</span></a> for the supported software stack, prerequisites, and installation helper.</p>
-</div></blockquote>
-<section id="option-a-docker-recommended">
-<h2>🐳 Option A: Docker (recommended)<a class="headerlink" href="#option-a-docker-recommended" title="Link to this heading">#</a></h2>
-<p><strong>1. Pull the image</strong></p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>docker<span class="w"> </span>pull<span class="w"> </span>hongccc/sglang-omni:dev
-</pre></div>
-</div>
-<p>Only the <code class="docutils literal notranslate"><span class="pre">dev</span></code> tag is published today. It moves with main — pin by digest for reproducible runs:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>docker<span class="w"> </span>pull<span class="w"> </span>lmsysorg/sglang-omni@sha256:&lt;digest&gt;
-</pre></div>
-</div>
-<p><strong>2. Run the container</strong></p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>docker<span class="w"> </span>run<span class="w"> </span>-it<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>--shm-size<span class="w"> </span>32g<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>--gpus<span class="w"> </span>all<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>--ipc<span class="w"> </span>host<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>--network<span class="w"> </span>host<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>--privileged<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>hongccc/sglang-omni:dev<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>/bin/zsh
-</pre></div>
-</div>
-<p><strong>3. Install <code class="docutils literal notranslate"><span class="pre">sglang-omni</span></code> inside the container</strong></p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pip<span class="w"> </span>install<span class="w"> </span>--upgrade<span class="w"> </span>pip
-pip<span class="w"> </span>install<span class="w"> </span>uv
-
-uv<span class="w"> </span>venv<span class="w"> </span>.venv<span class="w"> </span>-p<span class="w"> </span><span class="m">3</span>.12
-<span class="nb">source</span><span class="w"> </span>.venv/bin/activate
-
-uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>--prerelease<span class="o">=</span>allow<span class="w"> </span><span class="s2">"sglang-omni==0.1.4"</span>
-</pre></div>
-</div>
-<p><a id="macos-apple-silicon"></a></p>
+<section id="why-a-separate-pyproject">
+<h2>Why a separate pyproject<a class="headerlink" href="#why-a-separate-pyproject" title="Link to this heading">#</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span> <span class="pre">-e</span> <span class="pre">.</span></code> resolves <a class="reference download internal" download="" href="../_downloads/079962c730e6e61f3f9971f670e9cf70/pyproject.toml"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">pyproject.toml</span></code></span></a>. In CUDA-oriented
+checkouts, that can pull CUDA-only wheels and replace a CPU torch stack.
+<a class="reference download internal" download="" href="../_downloads/959ec2b004cde39ac406608c01e9684b/pyproject_cpu.toml"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">pyproject_cpu.toml</span></code></span></a> pins the torch family to CPU wheels and
+omits accelerator-only packages.</p>
 </section>
-<section id="option-b-macos-apple-silicon-installer">
-<h2>🍎 Option B: macOS Apple Silicon installer<a class="headerlink" href="#option-b-macos-apple-silicon-installer" title="Link to this heading">#</a></h2>
-<p>From a checkout of this branch, run:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>./install.sh
-<span class="nb">source</span><span class="w"> </span>.venv-apple/bin/activate
-</pre></div>
-</div>
-<p>The script is idempotent and creates (or reuses) <code class="docutils literal notranslate"><span class="pre">.venv-apple</span></code>, installs the
-Homebrew formulae <code class="docutils literal notranslate"><span class="pre">ffmpeg&#64;7</span></code> and <code class="docutils literal notranslate"><span class="pre">uv</span></code> (and <code class="docutils literal notranslate"><span class="pre">git</span></code> only when a working git is not
-already available), installs SGLang <code class="docutils literal notranslate"><span class="pre">v0.5.18</span></code> from source with its <code class="docutils literal notranslate"><span class="pre">all_mps</span></code>
-extra, and installs this checkout with <code class="docutils literal notranslate"><span class="pre">uv</span> <span class="pre">pip</span></code>. SGLang’s optional Rust
-extensions are not needed by this Apple Silicon path and are skipped.
-<code class="docutils literal notranslate"><span class="pre">ffmpeg&#64;7</span></code> is intentional: <code class="docutils literal notranslate"><span class="pre">torchcodec==0.11.1</span></code> does not support the current
-unversioned FFmpeg 9 formula. At runtime, expose its libraries:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="nb">export</span><span class="w"> </span><span class="nv">DYLD_LIBRARY_PATH</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span>brew<span class="w"> </span>--prefix<span class="w"> </span>ffmpeg@7<span class="k">)</span><span class="s2">/lib</span><span class="si">${</span><span class="nv">DYLD_LIBRARY_PATH</span><span class="p">:+:</span><span class="nv">$DYLD_LIBRARY_PATH</span><span class="si">}</span><span class="s2">"</span>
-</pre></div>
-</div>
-<p>Homebrew must be installed before running the script. If <code class="docutils literal notranslate"><span class="pre">brew</span></code> is missing, the
-script prints an error and exits; install it yourself from
-<a class="reference external" href="https://brew.sh">brew.sh</a>, then rerun. The installer never invokes <code class="docutils literal notranslate"><span class="pre">sudo</span></code> or
-Homebrew’s bootstrapper. Use <code class="docutils literal notranslate"><span class="pre">--non-interactive</span></code> (or <code class="docutils literal notranslate"><span class="pre">NONINTERACTIVE=1</span></code>) to
-disable Homebrew auto-update in CI, <code class="docutils literal notranslate"><span class="pre">SGLANG_OMNI_VENV=/path/to/venv</span></code> to choose a virtualenv, and
-<code class="docutils literal notranslate"><span class="pre">SGLANG_OMNI_EXTRAS=audar-tts,fun-cosyvoice3</span></code> to enable optional extras.
-The persistent SGLang source checkout defaults to
-<code class="docutils literal notranslate"><span class="pre">~/.cache/sglang-omni/sglang-v0.5.18</span></code> and can be changed with
-<code class="docutils literal notranslate"><span class="pre">SGLANG_SOURCE_DIR</span></code>. Slow or proxied networks can override the installer’s uv
-defaults with <code class="docutils literal notranslate"><span class="pre">UV_HTTP_TIMEOUT</span></code> and <code class="docutils literal notranslate"><span class="pre">UV_HTTP_RETRIES</span></code>.</p>
-<p>This path currently supports macOS <code class="docutils literal notranslate"><span class="pre">arm64</span></code> only and is intended for the
-Apple-Silicon Qwen3-ASR MLX/Torch-MPS paths. Other platforms should use the
-Docker, manual, or Intel XPU instructions below. Common failures are a missing
-Homebrew/uv on <code class="docutils literal notranslate"><span class="pre">PATH</span></code>, an unavailable Python 3.12 toolchain, or forgetting the
-<code class="docutils literal notranslate"><span class="pre">DYLD_LIBRARY_PATH</span></code> export when starting an audio server.</p>
-<section id="run-from-a-hosted-installer">
-<h3>Run from a hosted installer<a class="headerlink" href="#run-from-a-hosted-installer" title="Link to this heading">#</a></h3>
-<p>The script also supports a downloaded or <code class="docutils literal notranslate"><span class="pre">curl</span> <span class="pre">|</span> <span class="pre">bash</span></code> invocation: when it is
-not inside an sglang-omni checkout, it clones the repository specified by
-<code class="docutils literal notranslate"><span class="pre">SGLANG_OMNI_REPO</span></code> and <code class="docutils literal notranslate"><span class="pre">SGLANG_OMNI_REF</span></code> into the cache and installs that
-checkout. Prefer downloading, reviewing, and then running a pinned script:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>curl<span class="w"> </span>-fsSLo<span class="w"> </span>/tmp/sglang-omni-install.sh<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>https://raw.githubusercontent.com/sgl-project/sglang-omni/&lt;commit&gt;/install.sh
-less<span class="w"> </span>/tmp/sglang-omni-install.sh
-chmod<span class="w"> </span>+x<span class="w"> </span>/tmp/sglang-omni-install.sh
-<span class="nv">SGLANG_OMNI_REF</span><span class="o">=</span>&lt;commit&gt;<span class="w"> </span>/tmp/sglang-omni-install.sh
-</pre></div>
-</div>
-<p>Piping a remote script directly to Bash executes code without a review step;
-use it only when that trade-off is acceptable:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>curl<span class="w"> </span>-fsSL<span class="w"> </span>https://raw.githubusercontent.com/sgl-project/sglang-omni/&lt;commit&gt;/install.sh<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span><span class="p">|</span><span class="w"> </span><span class="nv">SGLANG_OMNI_REF</span><span class="o">=</span>&lt;commit&gt;<span class="w"> </span>bash
-</pre></div>
-</div>
-<p>For a fork or an internal mirror, set <code class="docutils literal notranslate"><span class="pre">SGLANG_OMNI_REPO</span></code> and
-<code class="docutils literal notranslate"><span class="pre">SGLANG_OMNI_REF</span></code> explicitly. The hosted mode stores the project checkout at
-<code class="docutils literal notranslate"><span class="pre">~/.cache/sglang-omni/sglang-omni-&lt;ref&gt;</span></code> by default; override it with
-<code class="docutils literal notranslate"><span class="pre">SGLANG_OMNI_PROJECT_DIR</span></code>.</p>
-</section>
-</section>
-<section id="option-c-manual-install">
-<h2>🛠️ Option C: Manual install<a class="headerlink" href="#option-c-manual-install" title="Link to this heading">#</a></h2>
-<p>Build prerequisites first:</p>
+<section id="prerequisites">
+<h2>Prerequisites<a class="headerlink" href="#prerequisites" title="Link to this heading">#</a></h2>
 <ul class="simple">
-<li><p><strong>UCX 1.20.x</strong> with CUDA + verbs — <a class="reference external" href="https://github.com/openucx/ucx">upstream</a>, or reuse flags in <a class="reference download internal" download="" href="../_downloads/9c6d2dd30e172995ff9466799d6f77ed/Dockerfile"><span class="xref download myst"><code class="docutils literal notranslate"><span class="pre">docker/Dockerfile</span></code></span></a>.</p></li>
-<li><p><strong>flash-attn-4</strong> <code class="docutils literal notranslate"><span class="pre">&gt;=4.0.0b18</span></code>, matching <code class="docutils literal notranslate"><span class="pre">torch==2.13.0</span></code> and SGLang 0.5.18’s <code class="docutils literal notranslate"><span class="pre">nvidia-cutlass-dsl</span></code> 4.6.2 pin.</p></li>
+<li><p>Python &gt;= 3.10,&lt;3.13</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">uv</span></code></p></li>
+<li><p>A CPU build of SGLang from the matching upstream release.</p></li>
+<li><p>Standard audio runtime libraries such as <code class="docutils literal notranslate"><span class="pre">ffmpeg</span></code> and <code class="docutils literal notranslate"><span class="pre">libsndfile</span></code>.</p></li>
 </ul>
-<p>Then:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pip<span class="w"> </span>install<span class="w"> </span>--upgrade<span class="w"> </span>pip
-pip<span class="w"> </span>install<span class="w"> </span>uv
-
-uv<span class="w"> </span>venv<span class="w"> </span>.venv<span class="w"> </span>-p<span class="w"> </span><span class="m">3</span>.12
-<span class="nb">source</span><span class="w"> </span>.venv/bin/activate
-
-uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>--prerelease<span class="o">=</span>allow<span class="w"> </span><span class="s2">"sglang-omni==0.1.4"</span>
-</pre></div>
-</div>
-<p>Latest on the index without a pin: <code class="docutils literal notranslate"><span class="pre">uv</span> <span class="pre">pip</span> <span class="pre">install</span> <span class="pre">--prerelease=allow</span> <span class="pre">sglang-omni</span></code>.</p>
-<section id="install-from-source">
-<h3>Install from source<a class="headerlink" href="#install-from-source" title="Link to this heading">#</a></h3>
-<p>For development or unreleased changes:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>git<span class="w"> </span>clone<span class="w"> </span>git@github.com:sgl-project/sglang-omni.git
+</section>
+<section id="option-a-docker">
+<h2>🐳 Option A: Docker<a class="headerlink" href="#option-a-docker" title="Link to this heading">#</a></h2>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Clone the SGLang-omni repository</span>
+git<span class="w"> </span>clone<span class="w"> </span>https://github.com/sgl-project/sglang-omni.git
 <span class="nb">cd</span><span class="w"> </span>sglang-omni
 
-pip<span class="w"> </span>install<span class="w"> </span>--upgrade<span class="w"> </span>pip
-pip<span class="w"> </span>install<span class="w"> </span>uv
+<span class="c1"># Build the docker image</span>
+docker<span class="w"> </span>build<span class="w"> </span>-f<span class="w"> </span>docker/cpu.Dockerfile<span class="w"> </span>-t<span class="w"> </span>sglang-omni:cpu<span class="w"> </span>.
+
+<span class="c1"># Initiate a docker container</span>
+docker<span class="w"> </span>run<span class="w"> </span>-it<span class="w"> </span>--shm-size<span class="w"> </span>32g<span class="w"> </span>--ipc<span class="w"> </span>host<span class="w"> </span>--network<span class="w"> </span>host<span class="w"> </span>sglang-omni:cpu
+</pre></div>
+</div>
+<p>The image installs upstream SGLang with its CPU pyproject, then installs <code class="docutils literal notranslate"><span class="pre">sglang-omni</span></code>
+with <code class="docutils literal notranslate"><span class="pre">pyproject_cpu.toml</span></code>. It sets <code class="docutils literal notranslate"><span class="pre">SGLANG_USE_CPU_ENGINE=1</span></code> for the runtime.</p>
+</section>
+<section id="option-b-manual-install">
+<h2>🛠️ Option B: Manual install<a class="headerlink" href="#option-b-manual-install" title="Link to this heading">#</a></h2>
+<p>Create and activate an environment first:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/sgl-project/sglang-omni.git
+<span class="nb">cd</span><span class="w"> </span>sglang-omni
+<span class="nv">OMNI_DIR</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span><span class="nb">pwd</span><span class="k">)</span><span class="s2">"</span>
 
 uv<span class="w"> </span>venv<span class="w"> </span>.venv<span class="w"> </span>-p<span class="w"> </span><span class="m">3</span>.12
 <span class="nb">source</span><span class="w"> </span>.venv/bin/activate
-
-uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>--prerelease<span class="o">=</span>allow<span class="w"> </span>-v<span class="w"> </span>-e<span class="w"> </span>.<span class="w">   </span><span class="c1"># drop -e for a non-editable install</span>
+uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>--upgrade<span class="w"> </span>pip<span class="w"> </span><span class="s2">"packaging&gt;=24.2"</span><span class="w"> </span><span class="s2">"setuptools&gt;=77.0.0"</span><span class="w"> </span>wheel
 </pre></div>
 </div>
+<p>Install the matching CPU SGLang build:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/sgl-project/sglang<span class="w"> </span>../sglang
+<span class="nb">cd</span><span class="w"> </span>../sglang
+git<span class="w"> </span>checkout<span class="w"> </span>v0.5.18
+
+<span class="nb">cd</span><span class="w"> </span>python
+cp<span class="w"> </span>pyproject_cpu.toml<span class="w"> </span>pyproject.toml
+uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.<span class="w"> </span>--no-build-isolation<span class="w"> </span>--extra-index-url<span class="w"> </span>https://download.pytorch.org/whl/cpu
+
+<span class="nb">cd</span><span class="w"> </span>sglang/kernels/aot
+cp<span class="w"> </span>pyproject_cpu.toml<span class="w"> </span>pyproject.toml
+uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.<span class="w"> </span>--no-build-isolation<span class="w"> </span>--extra-index-url<span class="w"> </span>https://download.pytorch.org/whl/cpu
+</pre></div>
+</div>
+<p>Install <code class="docutils literal notranslate"><span class="pre">sglang-omni</span></code> with the CPU pyproject:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="nb">cd</span><span class="w"> </span><span class="s2">"</span><span class="nv">$OMNI_DIR</span><span class="s2">"</span>
+bash<span class="w"> </span>scripts/cpu/install_cpu.sh
+</pre></div>
+</div>
+</section>
+<section id="verify">
+<h2>Verify<a class="headerlink" href="#verify" title="Link to this heading">#</a></h2>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>python<span class="w"> </span>-c<span class="w"> </span><span class="s2">"import sglang_omni, torch; print(sglang_omni.__file__, torch.__version__)"</span>
+which<span class="w"> </span>sgl-omni
+</pre></div>
+</div>
+<p>The torch version should resolve to a CPU build. CPU-specific unit tests live in
+one directory, so CI (and you) can select them without touching the accelerator
+suites:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="nv">SGLANG_USE_CPU_ENGINE</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>pytest<span class="w"> </span>tests/unit_test/cpu<span class="w"> </span>-v
+</pre></div>
+</div>
+<blockquote>
+<div><p><strong><code class="docutils literal notranslate"><span class="pre">SGLANG_USE_CPU_ENGINE=1</span></code> is required at runtime.</strong> Without it the platform
+layer reports <code class="docutils literal notranslate"><span class="pre">device_type</span> <span class="pre">==</span> <span class="pre">&quot;cpu&quot;</span></code> while <code class="docutils literal notranslate"><span class="pre">is_cpu()</span></code> stays <code class="docutils literal notranslate"><span class="pre">False</span></code>, so code
+that branches on the platform silently takes the accelerator path.</p>
+</div></blockquote>
+<section id="audio-decoding-fails-with-libtorchcodec-core-so">
+<h3>Audio decoding fails with <code class="docutils literal notranslate"><span class="pre">libtorchcodec_core*.so</span></code><a class="headerlink" href="#audio-decoding-fails-with-libtorchcodec-core-so" title="Link to this heading">#</a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">utils/audio.py</span></code> decodes through <code class="docutils literal notranslate"><span class="pre">torchcodec</span></code>, which loads FFmpeg’s shared
+libraries at import. An unsupported FFmpeg version can surface as the unhelpful
+<code class="docutils literal notranslate"><span class="pre">Could</span> <span class="pre">not</span> <span class="pre">load</span> <span class="pre">this</span> <span class="pre">library</span></code> error.</p>
+<p><code class="docutils literal notranslate"><span class="pre">torchcodec</span></code> ships loaders for FFmpeg majors 4–8 only; FFmpeg 9 satisfies none
+of them. Pin an older major if needed. Docker users get a supported major from
+<code class="docutils literal notranslate"><span class="pre">apt</span></code>.</p>
 </section>
 </section>
 </section>
@@ -667,20 +625,20 @@ uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </s
                   
 <div class="prev-next-area">
     <a class="left-prev"
-       href="../index.html"
+       href="installation_xpu.html"
        title="previous page">
       <i class="fa-solid fa-angle-left"></i>
       <div class="prev-next-info">
         <p class="prev-next-subtitle">previous</p>
-        <p class="prev-next-title">SGLang-Omni</p>
+        <p class="prev-next-title">🚀 Installation — Intel XPU</p>
       </div>
     </a>
     <a class="right-next"
-       href="installation_npu.html"
+       href="../cookbook/higgs_tts.html"
        title="next page">
       <div class="prev-next-info">
         <p class="prev-next-subtitle">next</p>
-        <p class="prev-next-title">Installation — Ascend NPU</p>
+        <p class="prev-next-title">Higgs TTS</p>
       </div>
       <i class="fa-solid fa-angle-right"></i>
     </a>
@@ -702,13 +660,12 @@ uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </s
   </div>
   <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="pst-show_toc_level nav section-nav flex-column">
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#option-a-docker-recommended">🐳 Option A: Docker (recommended)</a></li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#option-b-macos-apple-silicon-installer">🍎 Option B: macOS Apple Silicon installer</a><ul class="pst-show_toc_level nav section-nav flex-column">
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#run-from-a-hosted-installer">Run from a hosted installer</a></li>
-</ul>
-</li>
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#option-c-manual-install">🛠️ Option C: Manual install</a><ul class="pst-show_toc_level nav section-nav flex-column">
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#install-from-source">Install from source</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#why-a-separate-pyproject">Why a separate pyproject</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#prerequisites">Prerequisites</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#option-a-docker">🐳 Option A: Docker</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#option-b-manual-install">🛠️ Option B: Manual install</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#verify">Verify</a><ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#audio-decoding-fails-with-libtorchcodec-core-so">Audio decoding fails with <code class="docutils literal notranslate"><span class="pre">libtorchcodec_core*.so</span></code></a></li>
 </ul>
 </li>
 </ul>
