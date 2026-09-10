@@ -32,6 +32,12 @@ def get_decode_cuda_graph_bs(server_args: Any) -> Any:
 
 def get_prefill_cuda_graph_backend(server_args: Any) -> str:
     """Read the resolved SGLang prefill CUDA graph backend."""
+    if getattr(server_args, "disable_cuda_graph", False):
+        return CudaGraphBackend.DISABLED
+    if server_args.cuda_graph_config is None:
+        raise RuntimeError(
+            "SGLang returned no cuda_graph_config while CUDA graphs are enabled"
+        )
     return server_args.cuda_graph_config.prefill.backend
 
 

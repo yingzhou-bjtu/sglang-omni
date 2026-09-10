@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
+import sys
+import types
 from types import SimpleNamespace
 
 import pytest
@@ -143,3 +145,62 @@ def test_execution_bridge_rejects_speculative_decoding() -> None:
             req_to_token_pool="pool",
             spec_algorithm=_SpecAlgorithm(future_map, is_none=False),
         )
+
+
+def test_execution_bridge_supports_legacy_overlap_utils(monkeypatch) -> None:
+    class LegacyFutureMap:
+        def __init__(
+            self,
+            max_running_requests,
+            chunked_prefill_size,
+            context_len,
+            device,
+            spec_algorithm,
+        ):
+            self.args = (
+                max_running_requests,
+                chunked_prefill_size,
+                context_len,
+                device,
+                spec_algorithm,
+            )
+            self.resolved = False
+
+        def resolve_future(self, batch) -> None:
+            self.resolved = batch
+
+    legacy_module = types.ModuleType("sglang.srt.managers.overlap_utils")
+    legacy_module.FutureMap = LegacyFutureMap
+    monkeypatch.setitem(sys.modules, "sglang.srt.managers.overlap_utils", legacy_module)
+
+    class LegacySpecAlgorithm:
+        def is_none(self) -> bool:
+            return True
+
+    worker = SimpleNamespace(
+        model_runner=SimpleNamespace(
+            server_args=SimpleNamespace(
+                max_running_requests=4,
+                chunked_prefill_size=128,
+            ),
+            model_config=SimpleNamespace(context_len=2048),
+        )
+    )
+    bridge = SGLangExecutionBridge(
+        device=torch.device("cpu"),
+        worker=worker,
+        req_to_token_pool="pool",
+        spec_algorithm=LegacySpecAlgorithm(),
+    )
+
+    assert bridge._relay_payload_type is None
+    assert isinstance(bridge.future_map, LegacyFutureMap)
+    assert bridge.future_map.args[:3] == (4, 128, 2048)
+
+    batch = SimpleNamespace(
+        is_prefill_only=False,
+        sampling_info=None,
+    )
+    with bridge.forward_context(batch):
+        pass
+    assert bridge.future_map.resolved is batch

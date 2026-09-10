@@ -12,8 +12,14 @@ from sglang_omni.platforms.cuda import CUDAOmniPlatform
 from sglang_omni.platforms.interface import OmniPlatform
 from sglang_omni.platforms.musa import MUSAOmniPlatform
 from sglang_omni.platforms.npu import NPUOmniPlatform
-from sglang_omni.platforms.rocm import ROCMOmniPlatform
 from sglang_omni.platforms.xpu import XPUOmniPlatform
+
+try:
+    from sglang_omni.platforms.rocm import ROCMOmniPlatform
+except ModuleNotFoundError as exc:
+    if exc.name != "sglang.srt.platforms.rocm":
+        raise
+    ROCMOmniPlatform = None
 
 
 def _is_musa_available() -> bool:
@@ -59,6 +65,10 @@ def _as_omni_platform(platform: SRTPlatform) -> OmniPlatform:
     if platform.is_cuda():
         return CUDAOmniPlatform()
     if platform.is_rocm():
+        if ROCMOmniPlatform is None:
+            raise RuntimeError(
+                "ROCm platform support requires sglang.srt.platforms.rocm"
+            )
         return ROCMOmniPlatform()
     if platform.is_cpu():
         return CPUOmniPlatform()

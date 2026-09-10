@@ -17,10 +17,10 @@ import httpx
 import numpy as np
 import pybase64
 import torch
-import torchaudio
 import xxhash
 
 from sglang_omni.platforms import current_platform
+from sglang_omni.utils import torchaudio_compat as torchaudio
 
 _DEFAULT_REQUEST_TIMEOUT = 5
 logger = logging.getLogger(__name__)
@@ -136,12 +136,7 @@ def _load_with_torchaudio(
     if not check_torchcodec_ready():
         return _decode_with_soundfile(decoder_source)
     try:
-        # Function-scoped import so torchaudio is resolved from sys.modules at
-        # call time (upstream stages.py did the same, and unit tests rely on
-        # monkeypatching sys.modules["torchaudio"]).
-        import torchaudio as _torchaudio
-
-        return _torchaudio.load(decoder_source)
+        return torchaudio.load(decoder_source)
     except ImportError:
         return _decode_with_soundfile(decoder_source)
     except (MemoryError, torch.OutOfMemoryError):

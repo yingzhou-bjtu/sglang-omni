@@ -15,6 +15,15 @@ from sglang_omni.utils.gpu_compat import (
 logger = logging.getLogger(__name__)
 
 
+def _use_mlx() -> bool:
+    """Return whether the optional SGLang MLX bridge is active."""
+    try:
+        from sglang.srt.utils.tensor_bridge import use_mlx
+    except ImportError:
+        return False
+    return bool(use_mlx())
+
+
 class _SGLangServerArgsForDiagnostics(Protocol):
     attention_backend: str | None
     sampling_backend: str | None
@@ -42,9 +51,7 @@ def _describe_sglang_runtime_configuration(
 
 def init_sglang_cuda_graphs(model_worker: Any) -> None:
     """Initialize SGLang graphs with Omni's prefill-embedding capture view."""
-    from sglang.srt.utils.tensor_bridge import use_mlx
-
-    if use_mlx():
+    if _use_mlx():
         # note (yexiaodong): The MLX stub has no Torch graph lifecycle because
         # native MLX lazy evaluation owns graph execution.
         return
@@ -83,8 +90,10 @@ def _hidden_capture_max_tokens(server_args: Any) -> int:
         # when it exceeds the batch token budget, up to the model context bound.
         candidates.append(server_args.context_length)
     candidates.append(server_args.max_running_requests)
-    candidates.append(server_args.cuda_graph_config.decode.max_bs)
-    candidates.append(server_args.cuda_graph_config.prefill.max_bs)
+    cuda_graph_config = getattr(server_args, "cuda_graph_config", None)
+    if cuda_graph_config is not None:
+        candidates.append(cuda_graph_config.decode.max_bs)
+        candidates.append(cuda_graph_config.prefill.max_bs)
 
     positive = [int(value) for value in candidates if value is not None and value > 0]
     if not positive:
@@ -144,9 +153,7 @@ def create_sglang_infrastructure(
         kv_cache_bytes=kv_cache_bytes,
         enable_prefill_input_embeds=enable_prefill_input_embeds,
     )
-    from sglang.srt.utils.tensor_bridge import use_mlx
-
-    if use_mlx():
+    if _use_mlx():
         # Note (Jiaxin Deng): the MLX worker sizes no SGLang KV pool, so a
         # declared byte budget could only be ignored; refuse instead.
         if kv_cache_bytes is not None:
