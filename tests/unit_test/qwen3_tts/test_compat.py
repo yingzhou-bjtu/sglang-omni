@@ -6,6 +6,8 @@ from __future__ import annotations
 import ast
 import importlib.util
 import re
+import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -216,3 +218,62 @@ def test_runtime_install_hint_matches_the_documented_commands() -> None:
     hint = _runtime_install_hint()
     for command in _documented_install_commands(_INSTALL_DOCS[0]):
         assert command in hint, f"{command!r} missing from _QWEN_TTS_INSTALL_HINT"
+
+
+def test_musa_sampler_patch_is_idempotent_and_preserves_cpu(monkeypatch) -> None:
+    calls = []
+
+    def original(*args):
+        calls.append(args)
+        return "upstream"
+
+    sampler_module = types.ModuleType("sglang.srt.layers.sampler")
+    sampler_module.top_k_top_p_min_p_sampling_from_probs_torch = original
+    layers_module = types.ModuleType("sglang.srt.layers")
+    layers_module.sampler = sampler_module
+    monkeypatch.setitem(sys.modules, "sglang.srt.layers", layers_module)
+    monkeypatch.setitem(sys.modules, "sglang.srt.layers.sampler", sampler_module)
+
+    compat.apply_qwen_tts_musa_sampling_compatibility_patch()
+    patched = sampler_module.top_k_top_p_min_p_sampling_from_probs_torch
+    compat.apply_qwen_tts_musa_sampling_compatibility_patch()
+
+    result = patched(
+        torch.ones((1, 2)),
+        torch.ones((1,), dtype=torch.long),
+        torch.ones((1,)),
+        torch.zeros((1,)),
+        False,
+        None,
+        torch.zeros((1,), dtype=torch.long),
+    )
+
+    assert result == "upstream"
+    assert len(calls) == 1
+    assert patched is sampler_module.top_k_top_p_min_p_sampling_from_probs_torch
+
+
+def test_seeded_musa_sampler_uses_float32_log(monkeypatch) -> None:
+    observed = {}
+
+    def fake_multinomial(logprobs, seed, positions):
+        observed["dtype"] = logprobs.dtype
+        return torch.zeros((1, 1), dtype=torch.long)
+
+    sampler_module = types.ModuleType("sglang.srt.layers.sampler")
+    sampler_module.multinomial_with_seed = fake_multinomial
+    monkeypatch.setitem(sys.modules, "sglang.srt.layers.sampler", sampler_module)
+
+    probs = torch.tensor([[0.7, 0.3]], dtype=torch.float64)
+    result = compat._sample_seeded_musa_probs(
+        probs,
+        torch.tensor([2]),
+        torch.tensor([1.0]),
+        torch.tensor([0.0]),
+        False,
+        torch.tensor([7]),
+        torch.tensor([0]),
+    )
+
+    assert result.tolist() == [0]
+    assert observed["dtype"] is torch.float32
