@@ -198,7 +198,11 @@ def set_qwen3_tts_preprocessing_context(
             standalone=standalone,
             stream=(
                 torch.cuda.Stream(device=device)
-                if device is not None and device.type == "cuda" and not standalone
+                if (
+                    device is not None
+                    and device.type in {"cuda", "musa"}
+                    and not standalone
+                )
                 else None
             ),
         )
@@ -237,7 +241,7 @@ def _adopt_prepared_tensors(prepared: Qwen3TTSPreparedRequest) -> None:
         prepared.prompt_input_embeds,
         prepared.tts_pad_embed,
     ):
-        if tensor is not None and tensor.is_cuda:
+        if tensor is not None and tensor.device.type in {"cuda", "musa"}:
             tensor.record_stream(stream)
 
 
@@ -1625,7 +1629,7 @@ def make_qwen3_tts_scheduler_adapters(*, model: Any, wrapper: Any):
                 codes = torch.cat((ref_code, codes), dim=0)
                 # note (luojiaxuan): the step's ready event was recorded before
                 # this cat, so the prefixed chunk needs its own.
-                if codes.is_cuda:
+                if codes.device.type in {"cuda", "musa"}:
                     data.codes_ready_event = torch.cuda.Event()
                     data.codes_ready_event.record()
             metadata["ref_code_len"] = ref_code_len
