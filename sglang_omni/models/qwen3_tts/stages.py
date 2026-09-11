@@ -13,6 +13,7 @@ from typing import Any
 import torch
 
 from sglang_omni.models.qwen3_tts.compat import (
+    apply_qwen_tts_musa_sampling_compatibility_patch,
     apply_qwen_tts_transformers_compatibility_patches,
 )
 from sglang_omni.models.qwen3_tts.request_builders import (
@@ -55,6 +56,7 @@ def _load_qwen3_tts_tokenizer(
     attn_implementation: str | None,
 ):
     apply_qwen_tts_transformers_compatibility_patches()
+    apply_qwen_tts_musa_sampling_compatibility_patch()
     try:
         from qwen_tts import Qwen3TTSTokenizer
     except ImportError as exc:
@@ -90,6 +92,7 @@ def _load_qwen3_tts_tokenizer(
 
 def _register_qwen3_tts_hf_config() -> None:
     apply_qwen_tts_transformers_compatibility_patches()
+    apply_qwen_tts_musa_sampling_compatibility_patch()
     try:
         from qwen_tts.core.models import Qwen3TTSConfig
         from transformers import AutoConfig

@@ -11,6 +11,7 @@ import torch
 
 _APPLY_LOCK = threading.Lock()
 _PATCHED_FLAG = "_sglang_omni_qwen_tts_compat_patched"
+_MUSA_SAMPLER_PATCHED_FLAG = "_sglang_omni_qwen_tts_musa_sampler_patched"
 # Note (Akazaakane): the factories qwen-tts 0.1.1 imports. It splats one
 # mask_kwargs dict into both, so shimming create_causal_mask alone just moves
 # the failure to the next line.
@@ -130,3 +131,112 @@ def apply_qwen_tts_transformers_compatibility_patches() -> None:
         check_model_inputs_compat.__doc__ = getattr(original, "__doc__", None)
         setattr(check_model_inputs_compat, _PATCHED_FLAG, True)
         generic.check_model_inputs = check_model_inputs_compat
+
+
+def _sample_seeded_musa_probs(
+    probs: torch.Tensor,
+    top_ks: torch.Tensor,
+    top_ps: torch.Tensor,
+    min_ps: torch.Tensor,
+    need_min_p_sampling: bool,
+    sampling_seed: torch.Tensor,
+    positions: torch.Tensor,
+) -> torch.Tensor:
+    """Run SGLang's seeded probability sampling without MUSA float64 LOG."""
+    from sglang.srt.layers.sampler import multinomial_with_seed
+
+    probs_sort, probs_idx = probs.sort(dim=-1, descending=True)
+    probs_sum = torch.cumsum(probs_sort, dim=-1)
+    ranks = torch.arange(0, probs.shape[-1], device=probs.device).view(1, -1)
+    probs_sort[ranks >= top_ks.view(-1, 1)] = 0.0
+    probs_sort[(probs_sum - probs_sort) > top_ps.view(-1, 1)] = 0.0
+
+    if need_min_p_sampling:
+        min_p_thresholds = probs_sort[:, 0] * min_ps
+        probs_sort[probs_sort < min_p_thresholds.view(-1, 1)] = 0.0
+
+    # MUDNN in the validated MUSA runtime does not implement float64 LOG.
+    logprobs = probs_sort.to(dtype=torch.float32)
+    del probs_sort
+    logprobs.log_()
+    sampled_index = multinomial_with_seed(logprobs, sampling_seed, positions)
+    probs_idx = probs_idx.to(torch.int64)
+    return torch.gather(probs_idx, dim=1, index=sampled_index).view(-1)
+
+
+def apply_qwen_tts_musa_sampling_compatibility_patch() -> None:
+    """Adapt SGLang seeded probability sampling to MUSA-supported dtypes.
+
+    The affected SGLang sampler path converts filtered probabilities to
+    float64 before applying ``log_``. MUDNN in the validated MUSA runtime does
+    not implement float64 LOG, so only the MUSA + seeded branch is replaced.
+    Other devices and the unseeded branch continue through SGLang unchanged.
+    """
+    try:
+        from sglang.srt.layers import sampler as sglang_sampler
+    except ImportError:
+        return
+
+    original = getattr(
+        sglang_sampler,
+        "top_k_top_p_min_p_sampling_from_probs_torch",
+        None,
+    )
+    if original is None or getattr(original, _MUSA_SAMPLER_PATCHED_FLAG, False):
+        return
+
+    try:
+        parameters = inspect.signature(original).parameters
+    except (TypeError, ValueError):
+        return
+    required = {
+        "probs",
+        "top_ks",
+        "top_ps",
+        "min_ps",
+        "need_min_p_sampling",
+        "sampling_seed",
+        "positions",
+    }
+    if not required.issubset(parameters):
+        return
+
+    def sample_with_musa_float32_log(
+        probs: torch.Tensor,
+        top_ks: torch.Tensor,
+        top_ps: torch.Tensor,
+        min_ps: torch.Tensor,
+        need_min_p_sampling: bool,
+        sampling_seed: torch.Tensor | None,
+        positions: torch.Tensor,
+    ) -> torch.Tensor:
+        if probs.device.type == "musa" and sampling_seed is not None:
+            return _sample_seeded_musa_probs(
+                probs,
+                top_ks,
+                top_ps,
+                min_ps,
+                need_min_p_sampling,
+                sampling_seed,
+                positions,
+            )
+        return original(
+            probs,
+            top_ks,
+            top_ps,
+            min_ps,
+            need_min_p_sampling,
+            sampling_seed,
+            positions,
+        )
+
+    sample_with_musa_float32_log.__name__ = getattr(
+        original,
+        "__name__",
+        "top_k_top_p_min_p_sampling_from_probs_torch",
+    )
+    sample_with_musa_float32_log.__doc__ = getattr(original, "__doc__", None)
+    setattr(sample_with_musa_float32_log, _MUSA_SAMPLER_PATCHED_FLAG, True)
+    sglang_sampler.top_k_top_p_min_p_sampling_from_probs_torch = (
+        sample_with_musa_float32_log
+    )

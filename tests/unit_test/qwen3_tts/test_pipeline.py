@@ -2403,6 +2403,18 @@ def test_qwen3_tts_initial_decode_graphs_noop_on_cpu() -> None:
     assert decoder.decode_inputs == []
 
 
+def test_qwen3_tts_initial_decode_graphs_enable_musa_gate() -> None:
+    decoder = _FakeQwen3TTSDecoder()
+    graphs = _Qwen3TTSInitialDecodeGraphs(
+        decoder,
+        device=SimpleNamespace(type="musa"),
+        num_quantizers=2,
+        input_frames=17,
+    )
+
+    assert graphs._enabled is True
+
+
 def test_qwen3_tts_decode_graphs_key_by_frames_and_batch_bucket() -> None:
     decoder = _FakeQwen3TTSDecoder()
     graphs = _Qwen3TTSInitialDecodeGraphs(
@@ -2417,6 +2429,36 @@ def test_qwen3_tts_decode_graphs_key_by_frames_and_batch_bucket() -> None:
     assert graphs._batch_sizes == (1, 4)
     graphs.capture()
     assert graphs.decode(torch.zeros((1, 2, 24), dtype=torch.long)) is None
+
+
+def test_qwen3_tts_preprocessing_context_creates_musa_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created: list[object] = []
+    sentinel = object()
+
+    monkeypatch.setattr(
+        qwen3_request_builders,
+        "_get_qwen3_tts_adhoc_reference_service_locked",
+        lambda model, wrapper: None,
+    )
+    monkeypatch.setattr(
+        torch.cuda,
+        "Stream",
+        lambda device: created.append(device) or sentinel,
+    )
+
+    qwen3_request_builders.set_qwen3_tts_preprocessing_context(
+        model=SimpleNamespace(),
+        wrapper=SimpleNamespace(),
+        device=SimpleNamespace(type="musa"),
+    )
+    try:
+        assert qwen3_request_builders._PREPROCESSING_CONTEXT is not None
+        assert qwen3_request_builders._PREPROCESSING_CONTEXT.stream is sentinel
+        assert created[0].type == "musa"
+    finally:
+        qwen3_request_builders.clear_qwen3_tts_preprocessing_context()
 
 
 def test_qwen3_tts_decode_graphs_replay_pads_batch_and_slices_output() -> None:

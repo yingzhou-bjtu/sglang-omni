@@ -198,7 +198,11 @@ def set_qwen3_tts_preprocessing_context(
             standalone=standalone,
             stream=(
                 torch.cuda.Stream(device=device)
-                if device is not None and device.type == "cuda" and not standalone
+                if (
+                    device is not None
+                    and device.type in {"cuda", "musa"}
+                    and not standalone
+                )
                 else None
             ),
         )
@@ -237,7 +241,7 @@ def _adopt_prepared_tensors(prepared: Qwen3TTSPreparedRequest) -> None:
         prepared.prompt_input_embeds,
         prepared.tts_pad_embed,
     ):
-        if tensor is not None and tensor.is_cuda:
+        if tensor is not None and tensor.device.type in {"cuda", "musa"}:
             tensor.record_stream(stream)
 
 
@@ -744,13 +748,13 @@ class _Qwen3TTSAdhocReferenceInput:
 
 
 def _new_cuda_encode_stream(device: Any) -> torch.cuda.Stream | None:
-    if device is None or not torch.cuda.is_available():
+    if device is None:
         return None
     try:
         resolved = torch.device(device)
     except (TypeError, ValueError, RuntimeError):
         return None
-    if resolved.type != "cuda":
+    if resolved.type not in {"cuda", "musa"}:
         return None
     return torch.cuda.Stream(device=resolved)
 
@@ -759,7 +763,7 @@ def _record_ref_code_consumer_stream(ref_code: Any) -> Any:
     # note (luojiaxuan): reference codes may be allocated on the batcher's
     # private stream; register the consumer stream with the caching allocator
     # so a later batch cannot recycle the block while reads are still queued.
-    if isinstance(ref_code, torch.Tensor) and ref_code.is_cuda:
+    if isinstance(ref_code, torch.Tensor) and ref_code.device.type in {"cuda", "musa"}:
         ref_code.record_stream(torch.cuda.current_stream(ref_code.device))
     return ref_code
 
@@ -838,12 +842,14 @@ class _Qwen3TTSRefCodeBatcher:
             handoff.record(self._encode_stream)
             handoff.synchronize()
             return
-        cuda_devices = {
+        accelerator_devices = {
             outcome.device
             for outcome in outcomes.values()
-            if not isinstance(outcome, Exception) and getattr(outcome, "is_cuda", False)
+            if not isinstance(outcome, Exception)
+            and getattr(getattr(outcome, "device", None), "type", None)
+            in {"cuda", "musa"}
         }
-        for device in cuda_devices:
+        for device in accelerator_devices:
             torch.cuda.current_stream(device).synchronize()
 
     def _run(self) -> None:
@@ -1623,7 +1629,7 @@ def make_qwen3_tts_scheduler_adapters(*, model: Any, wrapper: Any):
                 codes = torch.cat((ref_code, codes), dim=0)
                 # note (luojiaxuan): the step's ready event was recorded before
                 # this cat, so the prefixed chunk needs its own.
-                if codes.is_cuda:
+                if codes.device.type in {"cuda", "musa"}:
                     data.codes_ready_event = torch.cuda.Event()
                     data.codes_ready_event.record()
             metadata["ref_code_len"] = ref_code_len

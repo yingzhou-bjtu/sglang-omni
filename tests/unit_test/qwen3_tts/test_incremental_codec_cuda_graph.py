@@ -6,6 +6,9 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from sglang_omni.models.qwen3_tts import (
+    incremental_codec_cuda_graph as qwen3_incremental_codec_cuda_graph,
+)
 from sglang_omni.models.qwen3_tts.incremental_codec import Qwen3TTSIncrementalCodecState
 from sglang_omni.models.qwen3_tts.incremental_codec_cuda_graph import (
     IncrementalCodecGraphKey,
@@ -120,6 +123,30 @@ def test_incremental_codec_graph_rejects_unknown_mode() -> None:
             enabled=False,
             arena=SimpleNamespace(scratch_slot=0),
         )
+
+
+def test_incremental_codec_graph_configures_musa_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        qwen3_incremental_codec_cuda_graph.torch,
+        "device",
+        lambda _: SimpleNamespace(type="musa", index=0),
+    )
+
+    runner = Qwen3TTSIncrementalCodecCudaGraphRunner(
+        SimpleNamespace(),
+        device="musa",
+        dtype=torch.float32,
+        num_quantizers=2,
+        mode="warm",
+        fresh_frames=(8,),
+        batch_sizes=(1,),
+        enabled=True,
+        arena=_FakeArena(),
+    )
+
+    assert runner._configured is True
 
 
 class _FakeArena:
