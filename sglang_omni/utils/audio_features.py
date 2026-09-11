@@ -7,8 +7,6 @@ import functools
 
 import torch
 
-from sglang_omni.utils import torchaudio_compat
-
 
 @functools.lru_cache(maxsize=32)
 def _mel_banks(
@@ -23,7 +21,7 @@ def _mel_banks(
     Note (Jiaxin Deng): torchaudio rebuilds this table inside every
     ``kaldi.fbank`` call; under load it is about a fifth of an ASR process.
     """
-    kaldi = torchaudio_compat.compliance.kaldi
+    import torchaudio.compliance.kaldi as kaldi
 
     banks, _ = kaldi.get_mel_banks(
         num_mel_bins,
@@ -55,21 +53,7 @@ def cached_fbank(
     Note (Jiaxin Deng): the defaults every caller shares are inlined so the
     table can be keyed by the few that vary; bit-identity is asserted in tests.
     """
-    kaldi = torchaudio_compat.compliance.kaldi
-    if not hasattr(kaldi, "_get_waveform_and_window_properties"):
-        return kaldi.fbank(
-            waveform,
-            num_mel_bins=num_mel_bins,
-            frame_length=frame_length,
-            frame_shift=frame_shift,
-            window_type=window_type,
-            sample_frequency=sample_frequency,
-            dither=0.0,
-            use_energy=False,
-            snip_edges=True,
-            preemphasis_coefficient=0.97,
-            use_power=True,
-        )
+    import torchaudio.compliance.kaldi as kaldi
 
     device, dtype = waveform.device, waveform.dtype
     (

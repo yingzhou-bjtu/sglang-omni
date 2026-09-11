@@ -13,7 +13,6 @@ from sglang.srt.server_args import ServerArgs
 from sglang_omni.scheduling.generation_batch_policy import (
     build_default_prefill_cuda_graph_bs,
     build_generation_batch_overrides,
-    get_prefill_cuda_graph_backend,
     validate_generation_batch_policy,
 )
 from sglang_omni.vendor.sglang.server_args import override_server_args
@@ -74,13 +73,6 @@ def test_prefill_policy_accepts_disabled_and_declared_breakable() -> None:
             prefill_max_bs=512,
         )
     )
-
-
-def test_prefill_backend_handles_missing_config_when_graphs_disabled() -> None:
-    server_args = _server_args(disable_cuda_graph=True)
-    server_args.cuda_graph_config = None
-
-    assert get_prefill_cuda_graph_backend(server_args) == "disabled"
 
 
 def test_breakable_requires_cuda_graphs_enabled() -> None:

@@ -12,15 +12,6 @@ from __future__ import annotations
 from typing import Optional, Tuple, Union
 
 import torch
-
-# SGLang 0.5.16 removed the dp_attention aliases. Keep the zero-argument
-# names used by Omni model implementations mapped to their new source.
-from sglang.srt.distributed.parallel_state import (
-    get_attn_tensor_model_parallel_rank as get_attention_tp_rank,
-)
-from sglang.srt.distributed.parallel_state import (
-    get_attn_tensor_model_parallel_world_size as get_attention_tp_size,
-)
 from sglang.srt.layers.activation import SiluAndMul
 from sglang.srt.layers.communicator import LayerCommunicator, LayerScatterModes
 from sglang.srt.layers.layernorm import RMSNorm
@@ -119,8 +110,6 @@ __all__ = [
     "should_use_flashinfer_cutlass_moe_fp4_allgather",
     "get_moe_impl_class",
     "RoutingMethodType",
-    "get_attention_tp_rank",
-    "get_attention_tp_size",
     "QuantizationConfig",
     "LayerCommunicator",
     "LayerScatterModes",
