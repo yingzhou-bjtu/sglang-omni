@@ -7,6 +7,7 @@ pass, sampling, logit post-processing, and output extraction.
 
 from __future__ import annotations
 
+import contextlib
 from collections import Counter
 from dataclasses import dataclass, replace
 from typing import Any
@@ -203,6 +204,14 @@ class ModelRunner:
             schedule_batch,
             isolate_sampling=isolate_sampling,
         )
+
+    def _musa_inference_context(self):
+        """Keep MUSA graph-buffer writes and sampling in one inference mode."""
+        is_musa = (
+            getattr(current_platform, "device_type", None) == "musa"
+            or getattr(self.device, "type", None) == "musa"
+        )
+        return torch.inference_mode() if is_musa else contextlib.nullcontext()
 
     @staticmethod
     def _restore_output_penalty_history(schedule_batch: Any) -> None:
@@ -491,6 +500,24 @@ class ModelRunner:
         return forward_batch, schedule_batch, is_prefill
 
     def _prepare_and_forward(
+        self,
+        forward_batch,
+        schedule_batch,
+        requests,
+        is_prefill,
+        *,
+        is_lookahead: bool = False,
+    ):
+        with self._musa_inference_context():
+            return self._prepare_and_forward_impl(
+                forward_batch,
+                schedule_batch,
+                requests,
+                is_prefill,
+                is_lookahead=is_lookahead,
+            )
+
+    def _prepare_and_forward_impl(
         self,
         forward_batch,
         schedule_batch,
