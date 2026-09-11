@@ -468,6 +468,8 @@ class SGLModelRunner(ModelRunner):
         get_flags().capture.enable_torch_compile = get_exec().graph.enable_torch_compile
         _install_prefill_runner_dispatch()
 
+        import torch
+
         from sglang_omni.platforms import current_platform
 
         # MUSA capture_begin rejects inplace updates to inference tensors when
