@@ -340,6 +340,21 @@ class SGLModelRunner(ModelRunner):
             )
         return kwargs
 
+    def forward(self, *args, **kwargs):
+        """Keep MUSA graph-buffer writes in the same mode as graph capture."""
+        import torch
+
+        from sglang_omni.platforms import current_platform
+
+        is_musa = (
+            getattr(current_platform, "device_type", None) == "musa"
+            or getattr(self.device, "type", None) == "musa"
+        )
+        if is_musa:
+            with torch.inference_mode():
+                return super().forward(*args, **kwargs)
+        return super().forward(*args, **kwargs)
+
     def _resolve_draft_load_format(self) -> str | None:
         """A weight-share follower builds its module tree with dummy weights.
 
