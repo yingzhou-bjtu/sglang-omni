@@ -304,6 +304,10 @@ class ModelRunner:
         )
 
     def execute(self, scheduler_output: Any) -> ModelRunnerOutput:
+        with self._musa_inference_context():
+            return self._execute_impl(scheduler_output)
+
+    def _execute_impl(self, scheduler_output: Any) -> ModelRunnerOutput:
         """Full synchronous pipeline: build → prepare → forward → post →
         sample → output.
 
@@ -358,6 +362,10 @@ class ModelRunner:
         )
 
     def execute_launch(self, scheduler_output: Any) -> "_PendingStep | None":
+        with self._musa_inference_context():
+            return self._execute_launch_impl(scheduler_output)
+
+    def _execute_launch_impl(self, scheduler_output: Any) -> "_PendingStep | None":
         """Enqueue a decode step's forward + on-GPU sample, call
         ``post_decode_launch`` to publish a model-specific resolve payload
         (returned as launch_buf), and record a device event right after
@@ -421,6 +429,12 @@ class ModelRunner:
         )
 
     def execute_resolve(
+        self, pending: "_PendingStep | None"
+    ) -> ModelRunnerOutput | None:
+        with self._musa_inference_context():
+            return self._execute_resolve_impl(pending)
+
+    def _execute_resolve_impl(
         self, pending: "_PendingStep | None"
     ) -> ModelRunnerOutput | None:
         """Consume a launched decode step: wait on its event (non-blocking
@@ -500,24 +514,6 @@ class ModelRunner:
         return forward_batch, schedule_batch, is_prefill
 
     def _prepare_and_forward(
-        self,
-        forward_batch,
-        schedule_batch,
-        requests,
-        is_prefill,
-        *,
-        is_lookahead: bool = False,
-    ):
-        with self._musa_inference_context():
-            return self._prepare_and_forward_impl(
-                forward_batch,
-                schedule_batch,
-                requests,
-                is_prefill,
-                is_lookahead=is_lookahead,
-            )
-
-    def _prepare_and_forward_impl(
         self,
         forward_batch,
         schedule_batch,
