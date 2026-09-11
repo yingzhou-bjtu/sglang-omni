@@ -1412,16 +1412,10 @@ def test_qwen3_tts_reference_code_batcher_synchronizes_cuda_results(
             assert sr == 24000
             return SimpleNamespace(audio_codes=[code])
 
-    current_stream_devices: list[torch.device] = []
-
-    def fake_current_stream(device: torch.device) -> FakeCurrentStream:
-        current_stream_devices.append(device)
-        return FakeCurrentStream()
-
     monkeypatch.setattr(
-        qwen3_request_builders,
-        "_current_device_stream",
-        fake_current_stream,
+        torch.cuda,
+        "current_stream",
+        lambda device: FakeCurrentStream(),
     )
     batcher = qwen3_request_builders._Qwen3TTSRefCodeBatcher(
         FakeSpeechTokenizer(),
@@ -1434,7 +1428,6 @@ def test_qwen3_tts_reference_code_batcher_synchronizes_cuda_results(
 
     assert result is code
     assert events == ["synchronize"]
-    assert current_stream_devices[0].type in {"cuda", "musa"}
 
 
 def test_qwen3_tts_reference_code_batcher_has_no_stream_for_cpu_device() -> None:
@@ -1450,30 +1443,6 @@ def test_qwen3_tts_reference_code_batcher_has_no_stream_for_cpu_device() -> None
         assert batcher._encode_stream is None
     finally:
         batcher.close()
-
-
-def test_qwen3_tts_reference_code_batcher_accepts_musa_device(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    expected_stream = object()
-    requested_devices: list[torch.device] = []
-
-    class FakeDeviceModule:
-        def Stream(self, *, device: torch.device) -> object:
-            requested_devices.append(device)
-            return expected_stream
-
-    monkeypatch.setattr(
-        qwen3_request_builders.torch,
-        "get_device_module",
-        lambda device: FakeDeviceModule(),
-    )
-
-    assert (
-        qwen3_request_builders._new_device_encode_stream(torch.device("musa"))
-        is expected_stream
-    )
-    assert requested_devices == [torch.device("musa")]
 
 
 @pytest.mark.accelerator
