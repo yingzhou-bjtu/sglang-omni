@@ -470,7 +470,15 @@ class SGLModelRunner(ModelRunner):
 
         from sglang_omni.platforms import current_platform
 
-        with contextlib.ExitStack() as pins:
+        # MUSA capture_begin rejects inplace updates to inference tensors when
+        # the caller enters graph capture under no_grad. Keep CUDA unchanged;
+        # the MUSA bridge requires capture and warmup to share inference mode.
+        capture_mode = (
+            torch.inference_mode()
+            if getattr(self.device, "type", None) == "musa"
+            else contextlib.nullcontext()
+        )
+        with capture_mode, contextlib.ExitStack() as pins:
             if current_platform.is_xpu():
                 pins.enter_context(current_platform.graph_capture_attention())
             result = super().init_cuda_graphs(capture_decode_cuda_graph)
