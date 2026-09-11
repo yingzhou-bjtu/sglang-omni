@@ -200,6 +200,40 @@ def test_xpu_platform_resolves_to_the_omni_xpu_platform() -> None:
     }
 
 
+def test_musa_backend_policy_bypasses_cuda_policy(monkeypatch) -> None:
+    import sglang_omni.platforms.cuda as cuda_platforms
+    import sglang_omni.platforms.musa as musa_platforms
+
+    calls = []
+
+    def omni_policy(self, server_args, model_config, model_arch_override):
+        del self, server_args, model_config, model_arch_override
+        calls.append("omni")
+        return "omni-policy"
+
+    def cuda_policy(self, server_args, model_config, model_arch_override):
+        del self, server_args, model_config, model_arch_override
+        calls.append("cuda")
+        return "cuda-policy"
+
+    monkeypatch.setattr(
+        OmniPlatform,
+        "apply_model_worker_backend_policy",
+        omni_policy,
+    )
+    monkeypatch.setattr(
+        cuda_platforms.CUDAOmniPlatform,
+        "apply_model_worker_backend_policy",
+        cuda_policy,
+    )
+
+    platform = object.__new__(musa_platforms.MUSAOmniPlatform)
+    result = platform.apply_model_worker_backend_policy(None, None, None)
+
+    assert result == "omni-policy"
+    assert calls == ["omni"]
+
+
 def test_xpu_names_the_decode_graph_backend_sglang_leaves_off() -> None:
     backend = xpu_platform.XPUOmniPlatform().get_decode_cuda_graph_backend()
 
