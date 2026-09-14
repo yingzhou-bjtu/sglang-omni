@@ -19,12 +19,6 @@ except ImportError as exc:
     logger.warning(
         f"Failed to import torchada: {exc}. MUSA platform compatibility will not work."
     )
-else:
-    from sglang_omni.platforms.torchada_compat import (
-        apply_torchada_compatibility_patches,
-    )
-
-    apply_torchada_compatibility_patches()
 
 
 class MUSAOmniPlatform(CUDAOmniPlatform):
