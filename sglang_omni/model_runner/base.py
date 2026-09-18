@@ -7,7 +7,6 @@ pass, sampling, logit post-processing, and output extraction.
 
 from __future__ import annotations
 
-import contextlib
 from collections import Counter
 from dataclasses import dataclass, replace
 from typing import Any
@@ -205,12 +204,6 @@ class ModelRunner:
             isolate_sampling=isolate_sampling,
         )
 
-    def _musa_inference_context(self):
-        """Keep MUSA graph-buffer writes and sampling in one inference mode."""
-        if current_platform.device_type == "musa":
-            return torch.inference_mode()
-        return contextlib.nullcontext()
-
     @staticmethod
     def _restore_output_penalty_history(schedule_batch: Any) -> None:
         """Re-seed retained output history into the prepared penalizers."""
@@ -302,10 +295,6 @@ class ModelRunner:
         )
 
     def execute(self, scheduler_output: Any) -> ModelRunnerOutput:
-        with self._musa_inference_context():
-            return self._execute_impl(scheduler_output)
-
-    def _execute_impl(self, scheduler_output: Any) -> ModelRunnerOutput:
         """Full synchronous pipeline: build → prepare → forward → post →
         sample → output.
 
@@ -360,10 +349,6 @@ class ModelRunner:
         )
 
     def execute_launch(self, scheduler_output: Any) -> "_PendingStep | None":
-        with self._musa_inference_context():
-            return self._execute_launch_impl(scheduler_output)
-
-    def _execute_launch_impl(self, scheduler_output: Any) -> "_PendingStep | None":
         """Enqueue a decode step's forward + on-GPU sample, call
         ``post_decode_launch`` to publish a model-specific resolve payload
         (returned as launch_buf), and record a device event right after
@@ -427,12 +412,6 @@ class ModelRunner:
         )
 
     def execute_resolve(
-        self, pending: "_PendingStep | None"
-    ) -> ModelRunnerOutput | None:
-        with self._musa_inference_context():
-            return self._execute_resolve_impl(pending)
-
-    def _execute_resolve_impl(
         self, pending: "_PendingStep | None"
     ) -> ModelRunnerOutput | None:
         """Consume a launched decode step: wait on its event (non-blocking

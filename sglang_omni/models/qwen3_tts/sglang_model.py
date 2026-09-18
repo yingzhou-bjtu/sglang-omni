@@ -184,13 +184,20 @@ class _PredictorDecodeGraph:
         talker_hidden: torch.Tensor,
         semantic_positions: torch.Tensor | None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
+        # note (yingzhou): MUSA capture stores graph buffers as inference
+        # tensors, so replay inplace copies must stay in inference mode.
+        replay_mode = (
+            torch.inference_mode()
+            if self.layer0_codes.device.type == "musa"
+            else nullcontext()
+        )
         live = layer0_codes.shape[0]
         if live > self.batch_size:
             raise ValueError(
                 "Qwen3-TTS predictor CUDA graph bucket is too small: "
                 f"bucket={self.batch_size}, live={live}"
             )
-        with torch.cuda.device(self.layer0_codes.device):
+        with replay_mode, torch.cuda.device(self.layer0_codes.device):
             self.layer0_codes[:live].copy_(layer0_codes)
             self.talker_hidden[:live].copy_(talker_hidden)
             if semantic_positions is None:

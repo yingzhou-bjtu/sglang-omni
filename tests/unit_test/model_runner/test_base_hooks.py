@@ -122,6 +122,8 @@ def _runner(calls: list[str], *, custom_result):
     runner = object.__new__(RecordingRunner)
     runner.device = torch.device("cpu")
     runner._execution_bridge = FakeExecutionBridge()
+    runner._host_staging_buffers = []
+    runner._staging_slot = 0
     runner.output_processor = SimpleNamespace(
         _capture_hidden=False,
         process=lambda result, scheduler_output: {
@@ -383,3 +385,54 @@ def test_finalize_default_batch_generation_hook_calls_single_hook() -> None:
     )
 
     assert calls == [("req-1", 1), ("req-2", 5)]
+
+
+def test_execute_does_not_wrap_host_staging_in_inference_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pinned host staging must stay an ordinary tensor on MUSA.
+
+    Graph capture/replay owns inference mode. Wrapping the whole Omni execute
+    path would allocate these buffers as inference tensors, and later inplace
+    copies after execute returns would fail.
+    """
+    import sglang_omni.platforms as platforms
+
+    monkeypatch.setattr(
+        platforms.current_platform, "device_type", "musa", raising=False
+    )
+    _install_fake_forward_batch_module(monkeypatch)
+    real_empty = torch.empty
+
+    def cpu_empty(*args, **kwargs):
+        kwargs.pop("pin_memory", None)
+        return real_empty(*args, **kwargs)
+
+    monkeypatch.setattr(torch, "empty", cpu_empty)
+    observed: dict[str, bool] = {}
+    runner = _runner(
+        [],
+        custom_result=SimpleNamespace(
+            logits_output=None,
+            next_token_ids=torch.tensor([7]),
+            can_run_cuda_graph=True,
+        ),
+    )
+
+    def post_decode(result, forward_batch, schedule_batch, requests) -> None:
+        del result, forward_batch, schedule_batch, requests
+        host_buf = runner._next_host_staging((1,), torch.long)
+        clone = host_buf[:1].detach().clone()
+        observed["inference_mode"] = torch.is_inference_mode_enabled()
+        observed["host_buf"] = host_buf.is_inference()
+        observed["clone"] = clone.is_inference()
+        host_buf[:1].fill_(3)
+        clone.fill_(4)
+
+    runner.post_decode = post_decode
+    runner.execute(_scheduler_output(is_prefill=False))
+    assert observed == {
+        "inference_mode": False,
+        "host_buf": False,
+        "clone": False,
+    }
