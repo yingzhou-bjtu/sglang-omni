@@ -15,6 +15,7 @@ from sglang_omni.model_runner.prefill_inputs import (
     attach_omni_prefill_inputs,
     get_omni_prefill_inputs,
 )
+from sglang_omni.platforms import current_platform
 from tests.unit_test.fakes import FakeExecutionBridge
 
 
@@ -396,11 +397,7 @@ def test_execute_does_not_wrap_host_staging_in_inference_mode(
     path would allocate these buffers as inference tensors, and later inplace
     copies after execute returns would fail.
     """
-    import sglang_omni.platforms as platforms
-
-    monkeypatch.setattr(
-        platforms.current_platform, "device_type", "musa", raising=False
-    )
+    monkeypatch.setattr(current_platform, "device_type", "musa", raising=False)
     _install_fake_forward_batch_module(monkeypatch)
     real_empty = torch.empty
 

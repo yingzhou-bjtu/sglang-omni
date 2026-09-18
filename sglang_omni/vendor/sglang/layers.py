@@ -4,6 +4,7 @@ Centralize third-party imports and apply monkey patches here.
 
 Patches applied to RMSNorm.forward_cuda:
   - Empty tensor early return (avoids CUDA kernel launch on zero-element tensors)
+  - MUSA float32 fallback to forward_native
   - dtype mismatch fallback when residual or post_residual_addition differ from x.dtype
 """
 
@@ -58,6 +59,8 @@ def _patched_forward_cuda(
                 residual = residual + post_residual_addition
             return x, residual
         return x
+    # note (yingzhou): MUSA float32 has no fused RMSNorm kernel, so keep the
+    # CUDA fused path and only native-fallback this dtype on MUSA.
     if x.device.type == "musa" and x.dtype == torch.float32:
         return self.forward_native(
             x,

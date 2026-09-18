@@ -1365,8 +1365,6 @@ class Qwen3TTSTalker(Qwen3TTSPromptBuilderMixin, nn.Module):
         )
         return captured
 
-    # Keep CUDA on the original no-grad path. MUSA graph capture rejects
-    # inplace updates to inference tensors created by the warmup.
     @torch.no_grad()
     def _capture_predictor_graph(
         self,
@@ -1379,6 +1377,8 @@ class Qwen3TTSTalker(Qwen3TTSPromptBuilderMixin, nn.Module):
         cyclic collector while a stream is capturing destroys its pool inside
         the capture."""
         device = self._predictor_k_cache.device
+        # note (yingzhou): CUDA stays on the original no-grad path. MUSA graph
+        # capture rejects inplace updates to inference tensors from warmup.
         capture_mode = (
             torch.inference_mode() if device.type == "musa" else nullcontext()
         )
