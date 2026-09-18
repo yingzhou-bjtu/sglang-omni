@@ -1700,7 +1700,7 @@ def test_rope_store_writes_the_cache_the_copy_path_writes(
             assert_matches_reference(replay_output)
 
 
-def _replay_autograd_mode(
+def replay_autograd_mode(
     monkeypatch: pytest.MonkeyPatch, device_type: str
 ) -> dict[str, bool]:
     graph = sglang_model_module._PredictorDecodeGraph(
@@ -1711,24 +1711,24 @@ def _replay_autograd_mode(
         hidden_dtype=torch.float32,
     )
 
-    class _DeviceTypeTensor(torch.Tensor):
+    class DeviceTypeTensor(torch.Tensor):
         @property
         def device(self):  # type: ignore[override]
             return SimpleNamespace(type=device_type)
 
     graph.layer0_codes = torch.zeros(1, 1, dtype=torch.long).as_subclass(
-        _DeviceTypeTensor
+        DeviceTypeTensor
     )
     graph.result_codes = torch.zeros(1, 1, dtype=torch.long)
     graph.summed_embeddings = torch.zeros(1, 1, 4)
     seen: dict[str, bool] = {}
 
-    class _FakeCudaGraph:
+    class FakeCudaGraph:
         def replay(self) -> None:
             seen["inference"] = torch.is_inference_mode_enabled()
             seen["grad"] = torch.is_grad_enabled()
 
-    class _NullDeviceGuard:
+    class NullDeviceGuard:
         def __init__(self, device) -> None:
             del device
 
@@ -1739,8 +1739,8 @@ def _replay_autograd_mode(
             del exc_type, exc, tb
             return False
 
-    graph.graph = _FakeCudaGraph()
-    monkeypatch.setattr(torch.cuda, "device", _NullDeviceGuard)
+    graph.graph = FakeCudaGraph()
+    monkeypatch.setattr(torch.cuda, "device", NullDeviceGuard)
     graph.replay(
         torch.zeros(1, 1, dtype=torch.long),
         torch.zeros(1, 1, 4),
@@ -1751,13 +1751,13 @@ def _replay_autograd_mode(
 
 def test_predictor_replay_uses_inference_mode_on_musa(monkeypatch: pytest.MonkeyPatch):
     """MUSA capture stores inference tensors; replay must enter the same mode."""
-    seen = _replay_autograd_mode(monkeypatch, "musa")
+    seen = replay_autograd_mode(monkeypatch, "musa")
     assert seen["inference"] is True
 
 
 def test_predictor_replay_stays_on_no_grad_for_cuda(monkeypatch: pytest.MonkeyPatch):
     """CUDA replay must keep the original no-grad path."""
-    seen = _replay_autograd_mode(monkeypatch, "cuda")
+    seen = replay_autograd_mode(monkeypatch, "cuda")
     assert seen["inference"] is False
     assert seen["grad"] is False
 
