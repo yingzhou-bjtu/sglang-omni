@@ -37,6 +37,7 @@ DEFAULT_GGUF_FILENAME = "Audar-TTS-V1-Turbo-Q4_K_M.gguf"
 DEFAULT_CODEC_MODEL = "neuphonic/neucodec"
 REFERENCE_SAMPLE_RATE = 16000
 OUTPUT_SAMPLE_RATE = 24000
+CODEC_HOP_LENGTH = 480
 MIN_REFERENCE_SECONDS = 5.0
 MAX_REFERENCE_SECONDS = 15.0
 
@@ -51,12 +52,59 @@ class _ReferenceInput:
 @lru_cache(maxsize=None)
 def _load_codec(model: str, revision: str, device: str) -> Any:
     try:
+        import neucodec.model as neucodec_model
         from neucodec import NeuCodec
     except ImportError as exc:
         raise RuntimeError(
             "Audar-TTS requires the 'audar-tts' optional dependencies"
         ) from exc
-    return NeuCodec.from_pretrained(model, revision=revision).eval().to(device)
+    path = Path(model).expanduser()
+    if not path.is_dir():
+        return NeuCodec.from_pretrained(model, revision=revision).eval().to(device)
+    ckpt_path = path / "pytorch_model.bin"
+    w2v_path = path.parent / "facebook_w2v_bert_2_0"
+    if not ckpt_path.is_file():
+        raise FileNotFoundError(f"Audar-TTS NeuCodec checkpoint not found: {ckpt_path}")
+    if not w2v_path.is_dir():
+        raise FileNotFoundError(
+            f"Audar-TTS local Wav2Vec2-BERT checkpoint not found: {w2v_path}"
+        )
+    orig_w2v_from_pretrained = neucodec_model.Wav2Vec2BertModel.from_pretrained
+    orig_feature_from_pretrained = neucodec_model.AutoFeatureExtractor.from_pretrained
+
+    def local_w2v_from_pretrained(name: str, *args: Any, **kwargs: Any) -> Any:
+        if name == "facebook/w2v-bert-2.0":
+            name = str(w2v_path)
+            kwargs["local_files_only"] = True
+        return orig_w2v_from_pretrained(name, *args, **kwargs)
+
+    def local_feature_from_pretrained(name: str, *args: Any, **kwargs: Any) -> Any:
+        if name == "facebook/w2v-bert-2.0":
+            name = str(w2v_path)
+            kwargs["local_files_only"] = True
+        return orig_feature_from_pretrained(name, *args, **kwargs)
+
+    # note (yingzhou): NeuCodec.from_pretrained only accepts the two Hugging
+    # Face model ids, so a local snapshot has to construct the module and load
+    # pytorch_model.bin itself.
+    neucodec_model.Wav2Vec2BertModel.from_pretrained = local_w2v_from_pretrained
+    neucodec_model.AutoFeatureExtractor.from_pretrained = local_feature_from_pretrained
+    try:
+        codec = NeuCodec(OUTPUT_SAMPLE_RATE, CODEC_HOP_LENGTH)
+    finally:
+        neucodec_model.Wav2Vec2BertModel.from_pretrained = orig_w2v_from_pretrained
+        neucodec_model.AutoFeatureExtractor.from_pretrained = (
+            orig_feature_from_pretrained
+        )
+    state_dict = torch.load(ckpt_path, map_location="cpu", weights_only=True)
+    ignore_keys = ("fc_post_s", "SemanticDecoder")
+    state_dict = {
+        key: value
+        for key, value in state_dict.items()
+        if not any(ignored in key for ignored in ignore_keys)
+    }
+    codec.load_state_dict(state_dict, strict=False)
+    return codec.eval().to(device)
 
 
 @lru_cache(maxsize=None)
@@ -242,15 +290,15 @@ def create_tts_engine_executor(
     from sglang_omni.utils.device import resolve_concrete_device
 
     concrete_device = resolve_concrete_device(device, gpu_id)
-    if concrete_device.type not in ("cpu", "cuda"):
+    if concrete_device.type not in ("cpu", "cuda", "musa"):
         raise ValueError(
-            "Audar-TTS llama.cpp engine runs on cuda or cpu only; resolved "
-            f"device={concrete_device}"
+            "Audar-TTS llama.cpp engine runs on cuda, musa, or cpu only; "
+            f"resolved device={concrete_device}"
         )
     main_gpu = concrete_device.index if concrete_device.type == "cuda" else 0
-    if concrete_device.type == "cpu":
+    if concrete_device.type in ("cpu", "musa"):
         # note (lennox): the n_gpu_layers default of -1 offloads every layer, so
-        # a cpu resolution would still run on GPU 0 without this.
+        # a cpu or musa resolution would still run on GPU 0 without this.
         n_gpu_layers = 0
     model_file = _resolve_gguf(model_path, gguf_filename, model_revision)
     llm = Llama(
