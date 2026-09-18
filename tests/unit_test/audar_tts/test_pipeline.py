@@ -11,6 +11,7 @@ import threading
 import time
 import types
 import wave
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -722,6 +723,91 @@ def test_codec_model_and_lock_are_shared_between_stages(
     assert loads == 1
 
 
+def test_load_codec_constructs_a_local_directory_snapshot(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """NeuCodec.from_pretrained rejects local directories, so the stage must
+    construct the module from pytorch_model.bin and the sibling Wav2Vec2-BERT
+    snapshot."""
+    codec_dir = tmp_path / "neucodec"
+    codec_dir.mkdir()
+    (codec_dir / "pytorch_model.bin").write_bytes(b"unused")
+    w2v_dir = tmp_path / "facebook_w2v_bert_2_0"
+    w2v_dir.mkdir()
+    captured: dict[str, object] = {}
+    codec = FakeCodec()
+    loads = 0
+
+    def fake_from_pretrained(name: str, *args: Any, **kwargs: Any) -> str:
+        captured.setdefault("pretrained", []).append((name, dict(kwargs)))
+        return f"loaded:{name}"
+
+    class FakeNeuCodec:
+        def __init__(self, sample_rate: int, hop_length: int) -> None:
+            captured["sample_rate"] = sample_rate
+            captured["hop_length"] = hop_length
+            nonlocal loads
+            loads += 1
+            import neucodec.model as neucodec_model
+
+            neucodec_model.Wav2Vec2BertModel.from_pretrained("facebook/w2v-bert-2.0")
+            neucodec_model.AutoFeatureExtractor.from_pretrained("facebook/w2v-bert-2.0")
+
+        def eval(self) -> "FakeNeuCodec":
+            return self
+
+        def to(self, device: str) -> FakeCodec:
+            captured["device"] = device
+            return codec
+
+        def load_state_dict(self, state_dict: dict[str, object], strict: bool) -> None:
+            captured["state_dict"] = state_dict
+            captured["strict"] = strict
+
+        @classmethod
+        def from_pretrained(cls, *args: Any, **kwargs: Any) -> FakeCodec:
+            raise AssertionError("local directories must not call from_pretrained")
+
+    monkeypatch.setitem(
+        sys.modules,
+        "neucodec",
+        types.SimpleNamespace(NeuCodec=FakeNeuCodec),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "neucodec.model",
+        types.SimpleNamespace(
+            Wav2Vec2BertModel=types.SimpleNamespace(
+                from_pretrained=fake_from_pretrained
+            ),
+            AutoFeatureExtractor=types.SimpleNamespace(
+                from_pretrained=fake_from_pretrained
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        stages.torch, "load", lambda *args, **kwargs: {"fc_post_s": 1, "ok": 2}
+    )
+    stages._load_codec.cache_clear()
+    try:
+        loaded = stages._load_codec(str(codec_dir), "main", "cpu")
+    finally:
+        stages._load_codec.cache_clear()
+
+    assert loaded is codec
+    assert loads == 1
+    assert captured["sample_rate"] == 24000
+    assert captured["hop_length"] == 480
+    assert captured["device"] == "cpu"
+    assert captured["state_dict"] == {"ok": 2}
+    assert captured["strict"] is False
+    names = [name for name, _ in captured["pretrained"]]
+    assert names == [str(w2v_dir), str(w2v_dir)]
+    assert all(
+        kwargs["local_files_only"] is True for _, kwargs in captured["pretrained"]
+    )
+
+
 def test_llama_cpp_stage_keeps_a_cpu_resolution_off_the_gpu(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -751,6 +837,34 @@ def test_llama_cpp_stage_keeps_a_cpu_resolution_off_the_gpu(
     assert captured["main_gpu"] == 0
 
 
+def test_llama_cpp_stage_keeps_a_musa_resolution_off_the_gpu(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """llama.cpp binds a CUDA main_gpu index; a MUSA host must not offload."""
+    captured: dict[str, object] = {}
+
+    class FakeLlama:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            raise RuntimeError("stop after capture")
+
+    from sglang_omni.platforms import current_platform
+
+    monkeypatch.setitem(
+        sys.modules,
+        "llama_cpp",
+        types.SimpleNamespace(LLAMA_SPLIT_MODE_NONE=0, Llama=FakeLlama),
+    )
+    monkeypatch.setattr(stages, "_resolve_gguf", lambda *args: "/model.gguf")
+    monkeypatch.setattr(current_platform, "device_type", "musa", raising=False)
+
+    with pytest.raises(RuntimeError, match="stop after capture"):
+        stages.create_tts_engine_executor("unused", gpu_id=1)
+
+    assert captured["n_gpu_layers"] == 0
+    assert captured["main_gpu"] == 0
+
+
 def test_llama_cpp_stage_rejects_a_device_it_cannot_serve(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -764,7 +878,7 @@ def test_llama_cpp_stage_rejects_a_device_it_cannot_serve(
         types.SimpleNamespace(LLAMA_SPLIT_MODE_NONE=0, Llama=object),
     )
     monkeypatch.setattr(current_platform, "device_type", "xpu", raising=False)
-    with pytest.raises(ValueError, match="cuda or cpu"):
+    with pytest.raises(ValueError, match="cuda, musa, or cpu"):
         stages.create_tts_engine_executor("unused", device="xpu", gpu_id=1)
 
 
