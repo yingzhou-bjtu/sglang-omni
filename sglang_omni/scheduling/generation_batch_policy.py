@@ -12,6 +12,8 @@ from sglang.srt.arg_groups.model_override_base import resolved_view
 from sglang.srt.model_executor.cuda_graph_config import Backend as CudaGraphBackend
 from sglang.srt.model_executor.cuda_graph_config import CudaGraphConfig
 
+from sglang_omni.platforms import current_platform
+
 logger = logging.getLogger(__name__)
 
 _MISSING = object()
@@ -178,6 +180,17 @@ def build_generation_batch_overrides(
         incoming.get("disable_prefill_cuda_graph")
     )
     if disables_prefill and "cuda_graph_backend_prefill" not in incoming:
+        overrides["cuda_graph_backend_prefill"] = CudaGraphBackend.DISABLED
+        overrides.pop("cuda_graph_bs_prefill", None)
+        overrides.pop("cuda_graph_max_bs_prefill", None)
+
+    if (
+        overrides.get("cuda_graph_backend_prefill") == CudaGraphBackend.BREAKABLE
+        and not current_platform.enable_breakable_prefill_graph()
+    ):
+        # Breakable prefill graphs read the stream capture status through
+        # cuda-python, so a platform that does not enable them keeps its decode
+        # graphs and runs prefill through the normal path.
         overrides["cuda_graph_backend_prefill"] = CudaGraphBackend.DISABLED
         overrides.pop("cuda_graph_bs_prefill", None)
         overrides.pop("cuda_graph_max_bs_prefill", None)

@@ -123,6 +123,15 @@ class OmniPlatform(DeviceMixin):
     def enable_thinker_decode_graph(self) -> bool:
         return True
 
+    def enable_breakable_prefill_graph(self) -> bool:
+        """Whether prefill may be captured as a breakable graph.
+
+        Breakable prefill graphs read the stream's capture status through
+        cuda-python, so a platform that does not enable them serves prefill
+        through the normal path while keeping its decode graphs.
+        """
+        return True
+
     def get_decode_cuda_graph_backend(self) -> str | None:
         return None
 
