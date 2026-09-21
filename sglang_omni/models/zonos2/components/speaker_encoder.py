@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import os
 import subprocess
 import threading
 import wave
@@ -30,12 +31,32 @@ from sglang_omni.scheduling.reference_encoder import (
 
 SPEAKER_EMBEDDING_DIM = 2048
 
+# Offline bundles stage the voice-embedding snapshot on disk and export this, so
+# the stage config stays optional for runs that cannot reach the Hugging Face hub.
+SPEAKER_EMBEDDING_PATH_ENV = "ZONOS2_SPEAKER_EMBEDDING_PATH"
+
+
+def resolve_speaker_embedding_source(model_path: str | None = None) -> str:
+    """Pick the source of the Qwen3 voice-embedding weights.
+
+    Priority: an explicit ``model_path`` from the stage config, then the
+    ``ZONOS2_SPEAKER_EMBEDDING_PATH`` override, and finally the Hugging Face hub
+    id. An existing directory wins as-is so a node without network access never
+    blocks on a download.
+    """
+    for candidate in (model_path, os.environ.get(SPEAKER_EMBEDDING_PATH_ENV)):
+        if candidate and Path(candidate).is_dir():
+            return str(candidate)
+    return model_path or Qwen3SpeakerEmbedding.MODEL_NAME
+
 
 class Qwen3SpeakerEmbedding(nn.Module):
     """Qwen3 voice embedding extractor for 2048-d speaker-conditioned checkpoints.
 
     Model id, mel parameters and preprocessing match the reference exactly so the
-    raw embedding is bit-for-bit identical.
+    raw embedding is bit-for-bit identical. ``model_path`` (or the
+    ``ZONOS2_SPEAKER_EMBEDDING_PATH`` override) may point at a local snapshot of
+    the same weights.
     """
 
     MODEL_NAME = "marksverdhei/Qwen3-Voice-Embedding-12Hz-1.7B"
@@ -47,13 +68,19 @@ class Qwen3SpeakerEmbedding(nn.Module):
     F_MIN = 0.0
     F_MAX = 12_000.0
 
-    def __init__(self, device: str = "cuda", compile_forward: bool = False):
+    def __init__(
+        self,
+        device: str = "cuda",
+        compile_forward: bool = False,
+        model_path: str | None = None,
+    ):
         super().__init__()
         self.device = device
         self._compile_forward = compile_forward
         self._compiled = None
+        self.model_path = resolve_speaker_embedding_source(model_path)
         self.model = AutoModel.from_pretrained(
-            self.MODEL_NAME,
+            self.model_path,
             trust_remote_code=True,
         )
         self.model.to(device)
@@ -250,12 +277,16 @@ class SpeakerEncoder(TensorReferenceEncodeHook[Zonos2RefInput]):
         device: str = "cuda",
         cache_max_items: int = 256,
         compile_forward: bool = False,
+        embedding_model: str | None = None,
     ):
         if int(cache_max_items) < 1:
             raise ValueError(f"cache_max_items must be >= 1, got {cache_max_items}")
         self.device = device
         self._embedder: Qwen3SpeakerEmbedding | None = None
         self._embedder_lock = threading.Lock()
+        # note (yingzhou): a local snapshot keeps reference encoding usable on
+        # nodes that cannot download the Qwen3 voice-embedding checkpoint.
+        self._embedding_model = embedding_model
         # note (Yue Yin): opt-in compile kill-switch (default OFF for bit-for-bit
         # parity); driven by the speaker_encode stage's spk_compile factory arg.
         self._compile = compile_forward
@@ -275,7 +306,9 @@ class SpeakerEncoder(TensorReferenceEncodeHook[Zonos2RefInput]):
             with self._embedder_lock:
                 if self._embedder is None:
                     self._embedder = Qwen3SpeakerEmbedding(
-                        device=self.device, compile_forward=self._compile
+                        device=self.device,
+                        compile_forward=self._compile,
+                        model_path=self._embedding_model,
                     )
         return self._embedder
 
