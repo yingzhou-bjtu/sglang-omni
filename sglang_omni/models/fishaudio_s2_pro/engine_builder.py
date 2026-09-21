@@ -27,6 +27,11 @@ def resolve_fast_ar_attention_backend(*, gpu_id: int) -> str:
     if current_platform.is_npu():
         # Ascend NPU uses the built-in "ascend" attention backend.
         return "ascend"
+    if current_platform.is_musa():
+        # MUSA devices expose no CUDA compute capability, so Fast-AR cannot be
+        # pinned to an SM-validated backend. Use the native attention path that
+        # the other MUSA TTS/ASR engines in this tree are validated against.
+        return "torch_native"
 
     sm_version = get_visible_gpu_sm_version(gpu_id)
     if sm_version is None:
