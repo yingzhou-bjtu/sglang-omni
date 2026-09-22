@@ -543,13 +543,16 @@ def test_acoustic_scheduler_accepts_the_relay_tensor_shape() -> None:
     assert decoder.hidden_shape == (1, 32768)
 
 
-def test_backbone_config_rewrite_does_not_write_through_a_symlink(
+def test_backbone_config_patch_leaves_the_snapshot_and_blob_alone(
     tmp_path: Path,
 ) -> None:
     """A Hub snapshot symlinks config.json into the shared blob store.
 
     Writing through the link would rewrite a blob whose filename is its own
-    content hash, corrupting it for every other snapshot that shares it.
+    content hash, corrupting it for every other snapshot that shares it, and
+    rewriting the snapshot at all breaks read-only weights mounts. The builder
+    therefore loads the backbone through a shadow directory, leaving both the
+    blob and the snapshot byte-identical.
     """
     from sglang_omni.models.minimax_music3.engine_builder import (
         MiniMaxMusic3EngineBuilder,
@@ -562,8 +565,11 @@ def test_backbone_config_rewrite_does_not_write_through_a_symlink(
     config_path = snapshot / "config.json"
     config_path.symlink_to(blob)
 
-    MiniMaxMusic3EngineBuilder.normalize_backbone_config(config_path)
+    shadow = MiniMaxMusic3EngineBuilder.normalize_backbone_config(config_path)
 
+    assert shadow is not None
     assert json.loads(blob.read_text())["model_type"] == "mixtral"
-    assert not config_path.is_symlink()
-    assert json.loads(config_path.read_text())["model_type"] == "qwen3"
+    assert config_path.is_symlink()
+    assert json.loads(config_path.read_text())["model_type"] == "mixtral"
+    assert json.loads((shadow / "config.json").read_text())["model_type"] == "qwen3"
+    assert not (snapshot / "config.json.bak").exists()
