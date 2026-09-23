@@ -429,8 +429,12 @@ def create_sglang_latent_engine_executor(
     server_args_overrides: dict[str, Any] | None = None,
 ) -> OmniScheduler:
     from sglang_omni.models.dots_tts.engine_builder import DotsTTSEngineBuilder
+    from sglang_omni.utils.device import resolve_concrete_device
 
-    if not torch.cuda.is_available():
+    if (
+        resolve_concrete_device(device, gpu_id).type == "cuda"
+        and not torch.cuda.is_available()
+    ):
         raise RuntimeError("dots.tts requires CUDA")
     return DotsTTSEngineBuilder(
         optimize=optimize,
@@ -458,11 +462,10 @@ def create_vocoder_executor(
 ) -> DotsTTSStreamingVocoder:
     from sglang_omni.utils.device import resolve_concrete_device
 
-    if not torch.cuda.is_available():
+    concrete_device = resolve_concrete_device(device, gpu_id)
+    if concrete_device.type == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("dots.tts requires CUDA")
-    codec = load_dots_audio_codec(
-        model_path, device=str(resolve_concrete_device(device, gpu_id))
-    )
+    codec = load_dots_audio_codec(model_path, device=str(concrete_device))
     vocoder = DotsTTSStreamingVocoder(
         codec,
         optimize=optimize,
@@ -482,7 +485,7 @@ def create_vocoder_executor(
         vocoder.merge_steps,
         vocoder.stream_slots,
         max_batch_size,
-        vocoder._stream_chunk_batch_max,
+        vocoder.stream_chunk_batch_max,
         max_batch_wait_ms,
     )
     return vocoder
