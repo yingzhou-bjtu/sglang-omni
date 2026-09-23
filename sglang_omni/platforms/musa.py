@@ -2,11 +2,16 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
+import torch
 from sglang.srt.platforms.device_mixin import PlatformEnum
 
 from sglang_omni.platforms.cuda import CUDAOmniPlatform
 from sglang_omni.platforms.interface import OmniPlatform
+
+if TYPE_CHECKING:
+    from sglang_omni.platforms.interface import JointRopeInplaceKernel
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +21,25 @@ except ImportError as exc:
     logger.warning(
         f"Failed to import torchada: {exc}. MUSA platform compatibility will not work."
     )
+
+
+def apply_rope_inplace(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    cos_sin_cache: torch.Tensor,
+    positions: torch.Tensor,
+    *,
+    is_neox: bool,
+) -> None:
+    """Apply SGLang's native rotary embedding to query and key in place."""
+    from sglang.srt.layers.rotary_embedding.utils import apply_rotary_emb
+
+    rows = cos_sin_cache.index_select(0, positions)
+    half = rows.shape[-1] // 2
+    cos = rows[:, :half]
+    sin = rows[:, half:]
+    q.copy_(apply_rotary_emb(q, cos, sin, is_neox))
+    k.copy_(apply_rotary_emb(k, cos, sin, is_neox))
 
 
 class MUSAOmniPlatform(CUDAOmniPlatform):
@@ -28,10 +52,10 @@ class MUSAOmniPlatform(CUDAOmniPlatform):
         # Use the native QK-norm + RoPE path on MUSA.
         return None
 
-    def get_joint_rope_inplace_kernel(self) -> None:
-        # Note(yzxiao): Do not inherit NVIDIA's joint-RoPE provider; MUSA needs
-        # its own implementation and validation of this capability.
-        return None
+    def get_joint_rope_inplace_kernel(self) -> JointRopeInplaceKernel:
+        # CUDA's fused provider is a JIT kernel. Reuse SGLang's native rotary
+        # embedding in place on MUSA until that compiler path is mapped.
+        return apply_rope_inplace
 
     def apply_model_worker_backend_policy(
         self,

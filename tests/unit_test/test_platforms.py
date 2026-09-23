@@ -16,6 +16,7 @@ from sglang.srt.platforms.rocm import RocmSRTPlatform
 from sglang.srt.platforms.xpu import XpuSRTPlatform
 
 import sglang_omni.platforms as platforms
+import sglang_omni.platforms.musa as musa
 import sglang_omni.platforms.xpu as xpu_platform
 from sglang_omni.pipeline.stage_workers import StageLaunchConfig
 from sglang_omni.platforms.cpu import CPUOmniPlatform
@@ -49,7 +50,6 @@ class _VendorSRTPlatform(SRTPlatform, _VendorDeviceMixin):
         ROCMOmniPlatform,
         XPUOmniPlatform,
         platforms.NPUOmniPlatform,
-        platforms.MUSAOmniPlatform,
         platforms.AppleOmniPlatform,
     ],
 )
@@ -63,6 +63,32 @@ def test_joint_rope_is_unavailable_without_a_platform_provider(
 
     assert platform_type().get_joint_rope_inplace_kernel() is None
     cuda_provider.assert_not_called()
+
+
+def test_musa_joint_rope_getter_returns_the_native_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cuda_provider = Mock(side_effect=AssertionError("Must not use NVIDIA provider"))
+    monkeypatch.setattr(
+        CUDAOmniPlatform, "get_joint_rope_inplace_kernel", cuda_provider
+    )
+
+    provider = platforms.MUSAOmniPlatform().get_joint_rope_inplace_kernel()
+
+    assert provider is musa.apply_rope_inplace
+    cuda_provider.assert_not_called()
+
+
+def test_musa_runtime_platform_resolves_to_the_omni_musa_platform() -> None:
+    class MusaSRTPlatform(SRTPlatform):
+        _enum = PlatformEnum.MUSA
+        device_name = "musa"
+        device_type = "musa"
+
+    platform = platforms.as_omni_platform(MusaSRTPlatform())
+
+    assert type(platform) is platforms.MUSAOmniPlatform
+    assert platform.get_joint_rope_inplace_kernel() is musa.apply_rope_inplace
 
 
 def test_cuda_joint_rope_getter_returns_upstream_kernel_without_calling_it(
