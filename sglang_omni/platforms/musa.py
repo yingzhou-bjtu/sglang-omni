@@ -31,7 +31,7 @@ def apply_rope_inplace(
     *,
     is_neox: bool,
 ) -> None:
-    """Apply SGLang's native rotary embedding to query and key in place."""
+    """Apply SGLang native rotary embedding to query and key in place."""
     from sglang.srt.layers.rotary_embedding.utils import apply_rotary_emb
 
     rows = cos_sin_cache.index_select(0, positions)
@@ -53,8 +53,8 @@ class MUSAOmniPlatform(CUDAOmniPlatform):
         return None
 
     def get_joint_rope_inplace_kernel(self) -> JointRopeInplaceKernel:
-        # CUDA's fused provider is a JIT kernel. Reuse SGLang's native rotary
-        # embedding in place on MUSA until that compiler path is mapped.
+        # note (yzxiao): CUDA fused joint RoPE is a JIT kernel. MUSA answers
+        # with SGLang native rotary embedding until that compiler path exists.
         return apply_rope_inplace
 
     def apply_model_worker_backend_policy(
