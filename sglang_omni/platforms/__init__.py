@@ -10,7 +10,7 @@ from sglang_omni.platforms.apple import AppleOmniPlatform
 from sglang_omni.platforms.cpu import CPUOmniPlatform
 from sglang_omni.platforms.cuda import CUDAOmniPlatform
 from sglang_omni.platforms.interface import OmniPlatform
-from sglang_omni.platforms.musa import MUSAOmniPlatform
+from sglang_omni.platforms.musa import MUSAOmniCapabilities, MUSAOmniPlatform
 from sglang_omni.platforms.npu import NPUOmniPlatform
 from sglang_omni.platforms.rocm import ROCMOmniPlatform
 from sglang_omni.platforms.xpu import XPUOmniPlatform
@@ -40,9 +40,12 @@ def load_platform_class(qualname: str) -> type[OmniPlatform]:
         return cls
     if not issubclass(cls, SRTPlatform):
         raise TypeError(f"Expected an SRTPlatform subclass: {qualname}")
+    # OmniPlatform is mixed in last, so a device with Omni-side capability
+    # implementations has to supply them ahead of it.
+    mixins = (MUSAOmniCapabilities,) if cls.device_type == "musa" else ()
     return type(
         f"Omni{cls.__name__}",
-        (cls, OmniPlatform),
+        (cls, *mixins, OmniPlatform),
         {"_omni_platform_qualname": qualname},
     )
 

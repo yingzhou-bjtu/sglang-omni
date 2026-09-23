@@ -16,10 +16,12 @@ from sglang.srt.platforms.rocm import RocmSRTPlatform
 from sglang.srt.platforms.xpu import XpuSRTPlatform
 
 import sglang_omni.platforms as platforms
+import sglang_omni.platforms.musa as musa
 import sglang_omni.platforms.xpu as xpu_platform
 from sglang_omni.pipeline.stage_workers import StageLaunchConfig
 from sglang_omni.platforms.cpu import CPUOmniPlatform
 from sglang_omni.platforms.cuda import CUDAOmniPlatform
+from sglang_omni.platforms.device_graph import CudaDeviceGraphBackend
 from sglang_omni.platforms.interface import OmniPlatform
 from sglang_omni.platforms.rocm import ROCMOmniPlatform
 from sglang_omni.platforms.xpu import XPUOmniPlatform
@@ -49,7 +51,6 @@ class _VendorSRTPlatform(SRTPlatform, _VendorDeviceMixin):
         ROCMOmniPlatform,
         XPUOmniPlatform,
         platforms.NPUOmniPlatform,
-        platforms.MUSAOmniPlatform,
         platforms.AppleOmniPlatform,
     ],
 )
@@ -63,6 +64,44 @@ def test_joint_rope_is_unavailable_without_a_platform_provider(
 
     assert platform_type().get_joint_rope_inplace_kernel() is None
     cuda_provider.assert_not_called()
+
+
+def test_musa_joint_rope_getter_returns_the_native_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cuda_provider = Mock(side_effect=AssertionError("Must not use NVIDIA provider"))
+    monkeypatch.setattr(
+        CUDAOmniPlatform, "get_joint_rope_inplace_kernel", cuda_provider
+    )
+
+    provider = platforms.MUSAOmniPlatform().get_joint_rope_inplace_kernel()
+
+    assert provider is musa.apply_rope_inplace
+    cuda_provider.assert_not_called()
+
+
+def test_musa_names_the_shared_cuda_graph_backend() -> None:
+    backend = platforms.MUSAOmniPlatform()._get_device_graph_backend()
+
+    assert isinstance(backend, CudaDeviceGraphBackend)
+
+
+def test_musa_declines_the_breakable_prefill_graph() -> None:
+    assert platforms.MUSAOmniPlatform().enable_breakable_prefill_graph() is False
+
+
+def test_musa_capabilities_survive_the_dynamically_built_platform() -> None:
+    """The runtime platform class is rebuilt from the SRT MUSA class."""
+    # note (yingzhou): load_platform_class mixes OmniPlatform in after that
+    # class, so the MUSA answers are reachable only through the mixin.
+    platform_type = platforms.load_platform_class(
+        "sglang.srt.platforms.musa.MusaSRTPlatform"
+    )
+    platform = platform_type()
+
+    assert platform.get_joint_rope_inplace_kernel() is musa.apply_rope_inplace
+    assert platform._get_device_graph_backend() is not None
+    assert platform.enable_breakable_prefill_graph() is False
 
 
 def test_cuda_joint_rope_getter_returns_upstream_kernel_without_calling_it(

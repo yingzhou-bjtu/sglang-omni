@@ -78,6 +78,7 @@ ALLOWED_DEFS: frozenset[tuple[str, str]] = frozenset(
         ("sglang_omni/platforms/rocm.py", "_get_device_graph_backend"),
         ("sglang_omni/platforms/npu.py", "_get_device_graph_backend"),
         ("sglang_omni/platforms/xpu.py", "_get_device_graph_backend"),
+        ("sglang_omni/platforms/musa.py", "_get_device_graph_backend"),
         # Same-scope public name already exists
         ("sglang_omni/scheduling/omni_scheduler.py", "_run_batch"),
         ("sglang_omni/models/minimax_music3/dit.py", "_transformer"),
