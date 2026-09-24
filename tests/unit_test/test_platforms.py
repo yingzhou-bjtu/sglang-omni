@@ -49,7 +49,6 @@ class _VendorSRTPlatform(SRTPlatform, _VendorDeviceMixin):
         ROCMOmniPlatform,
         XPUOmniPlatform,
         platforms.NPUOmniPlatform,
-        platforms.MUSAOmniPlatform,
         platforms.AppleOmniPlatform,
     ],
 )
@@ -63,6 +62,33 @@ def test_joint_rope_is_unavailable_without_a_platform_provider(
 
     assert platform_type().get_joint_rope_inplace_kernel() is None
     cuda_provider.assert_not_called()
+
+
+def test_musa_joint_rope_getter_returns_the_fused_rope_jit_kernel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module_name = "sglang.kernels.ops.attention.rope"
+    rope_module = ModuleType(module_name)
+    kernel = Mock(side_effect=AssertionError("Getter must not execute the kernel"))
+    rope_module.apply_rope_inplace = kernel
+    monkeypatch.setitem(sys.modules, module_name, rope_module)
+
+    assert platforms.MUSAOmniPlatform().get_joint_rope_inplace_kernel() is kernel
+    kernel.assert_not_called()
+
+
+def test_musa_runtime_platform_resolves_to_the_omni_musa_platform() -> None:
+    class MusaSRTPlatform(SRTPlatform):
+        _enum = PlatformEnum.MUSA
+        device_name = "musa"
+        device_type = "musa"
+
+    platform = platforms.as_omni_platform(MusaSRTPlatform())
+
+    assert type(platform) is platforms.MUSAOmniPlatform
+    assert platform.get_joint_rope_inplace_kernel is (
+        platforms.MUSAOmniPlatform.get_joint_rope_inplace_kernel
+    )
 
 
 def test_cuda_joint_rope_getter_returns_upstream_kernel_without_calling_it(
