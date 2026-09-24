@@ -21,7 +21,7 @@ from sglang_omni.vendor.sglang.server_args import override_server_args
 
 
 @pytest.fixture(autouse=True)
-def _breakable_prefill_capable_platform(monkeypatch: pytest.MonkeyPatch) -> None:
+def breakable_prefill_capable_platform(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep the cases below independent of the machine running them.
 
     `build_generation_batch_overrides` asks the platform whether breakable
@@ -332,6 +332,14 @@ def test_musa_platform_declines_breakable_prefill_graphs() -> None:
     from sglang_omni.platforms.musa import MUSAOmniPlatform
 
     assert MUSAOmniPlatform().enable_breakable_prefill_graph() is False
+
+
+def test_generic_platform_declines_breakable_prefill_graphs() -> None:
+    from sglang_omni.platforms.cpu import CPUOmniPlatform
+    from sglang_omni.platforms.cuda import CUDAOmniPlatform
+
+    assert CPUOmniPlatform().enable_breakable_prefill_graph() is False
+    assert CUDAOmniPlatform().enable_breakable_prefill_graph() is True
 
 
 def test_prefill_cap_is_not_clamped_by_max_prefill_tokens() -> None:
