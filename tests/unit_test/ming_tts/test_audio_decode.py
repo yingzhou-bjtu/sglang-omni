@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
-from contextlib import contextmanager, nullcontext
+from contextlib import nullcontext
 from types import SimpleNamespace
 from typing import Any
 
@@ -26,28 +26,6 @@ from sglang_omni.models.ming_tts.audio_decode import (
 )
 from sglang_omni.models.ming_tts.payload_types import MingTTSState
 from sglang_omni.proto import OmniRequest, StagePayload
-
-
-@pytest.fixture(autouse=True)
-def _fake_graph_backend(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Serve the capture path from a stand-in platform backend.
-
-    These cases replay graphs on CPU tensors, so they stub the platform the way
-    `test_talker_device_graph.py` does instead of depending on the host device.
-    """
-
-    class _FakeGraphBackend:
-        @contextmanager
-        def capture(self, **_kwargs: Any):
-            yield SimpleNamespace(
-                replay=lambda: None, reset=lambda: None, pool=lambda: None
-            )
-
-    monkeypatch.setattr(
-        audio_decode_module,
-        "current_platform",
-        SimpleNamespace(get_device_graph_backend=lambda _device: _FakeGraphBackend()),
-    )
 
 
 class _FakeAudioVAE(torch.nn.Module):
