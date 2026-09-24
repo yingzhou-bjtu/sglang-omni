@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import math
 from types import SimpleNamespace
 
 import pytest
@@ -57,8 +56,9 @@ def test_musa_kvcache_attention_matches_a_reference_reduction() -> None:
     repeat = heads // kv_heads
     key = key.repeat_interleave(repeat, dim=1)
     value = value.repeat_interleave(repeat, dim=1)
-    attn = torch.softmax((query / math.sqrt(head_dim)) @ key.transpose(-1, -2), dim=-1)
-    expected = (attn @ value).transpose(1, 2)
+    expected = torch.nn.functional.scaled_dot_product_attention(
+        query, key, value
+    ).transpose(1, 2)
 
     assert torch.allclose(out, expected, atol=1e-12)
 

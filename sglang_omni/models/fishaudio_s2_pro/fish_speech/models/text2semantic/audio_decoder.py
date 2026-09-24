@@ -173,12 +173,12 @@ def musa_kvcache_attention(
     v: torch.Tensor | None,
     cache_position: int,
 ) -> torch.Tensor:
-    """Run Fast-AR attention with plain torch ops on MUSA.
+    """Run Fast-AR attention with the native SDPA kernel on MUSA.
 
     The CUDA Fast-AR path is pinned to FA3 or FlashInfer, and neither backend is
     available on MUSA. A decode step feeds a single query token against the
-    cached prefix, so the reduction is a scaled matmul plus a softmax over that
-    prefix, which MUSA runs through its ordinary kernels.
+    cached prefix, so the same scaled-dot-product attention the Slow-AR path
+    already uses is enough here.
     """
     if k is None or v is None:
         raise ValueError("MUSA Fast-AR attention requires k and v")
@@ -204,11 +204,9 @@ def musa_kvcache_attention(
         key = key.repeat_interleave(repeat, dim=1)
         value = value.repeat_interleave(repeat, dim=1)
 
-    scale = 1.0 / math.sqrt(query.shape[-1])
     # The query token follows the whole cached prefix, so every cached position
     # stays visible and no causal mask is needed here.
-    attn = torch.softmax((query * scale) @ key.transpose(-1, -2), dim=-1)
-    return (attn @ value).transpose(1, 2)
+    return F.scaled_dot_product_attention(query, key, value).transpose(1, 2)
 
 
 @torch.library.custom_op(
