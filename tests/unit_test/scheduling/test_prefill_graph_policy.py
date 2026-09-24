@@ -20,6 +20,23 @@ from sglang_omni.scheduling.generation_batch_policy import (
 from sglang_omni.vendor.sglang.server_args import override_server_args
 
 
+@pytest.fixture(autouse=True)
+def breakable_prefill_capable_platform(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the cases below independent of the machine running them.
+
+    `build_generation_batch_overrides` asks the platform whether breakable
+    prefill graphs are available, so the default here matches a device that
+    serves them; the platform that answers "no" has its own case below.
+    """
+    from sglang_omni.scheduling import generation_batch_policy
+
+    monkeypatch.setattr(
+        generation_batch_policy,
+        "current_platform",
+        SimpleNamespace(enable_breakable_prefill_graph=lambda: True),
+    )
+
+
 def _server_args(
     *,
     prefill_backend: str = "disabled",
@@ -283,6 +300,46 @@ def test_breakable_prefill_cap_builds_the_shared_default_ladder() -> None:
     assert overrides["cuda_graph_bs_prefill"] == build_default_prefill_cuda_graph_bs(
         512
     )
+
+
+def test_breakable_prefill_is_dropped_when_the_platform_declines_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sglang_omni.scheduling import generation_batch_policy
+
+    monkeypatch.setattr(
+        generation_batch_policy,
+        "current_platform",
+        SimpleNamespace(enable_breakable_prefill_graph=lambda: False),
+    )
+    overrides = build_generation_batch_overrides(
+        max_running_requests=4,
+        server_args_overrides={
+            "cuda_graph_backend_prefill": "breakable",
+            "cuda_graph_max_bs_prefill": 512,
+        },
+    )
+
+    assert (
+        overrides["cuda_graph_backend_prefill"]
+        == generation_batch_policy.CudaGraphBackend.DISABLED
+    )
+    assert "cuda_graph_bs_prefill" not in overrides
+    assert "cuda_graph_max_bs_prefill" not in overrides
+
+
+def test_musa_platform_declines_breakable_prefill_graphs() -> None:
+    from sglang_omni.platforms.musa import MUSAOmniPlatform
+
+    assert MUSAOmniPlatform().enable_breakable_prefill_graph() is False
+
+
+def test_generic_platform_declines_breakable_prefill_graphs() -> None:
+    from sglang_omni.platforms.cpu import CPUOmniPlatform
+    from sglang_omni.platforms.cuda import CUDAOmniPlatform
+
+    assert CPUOmniPlatform().enable_breakable_prefill_graph() is False
+    assert CUDAOmniPlatform().enable_breakable_prefill_graph() is True
 
 
 def test_prefill_cap_is_not_clamped_by_max_prefill_tokens() -> None:

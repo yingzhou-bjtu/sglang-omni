@@ -51,6 +51,11 @@ def is_fp8_cutlass_moe_supported() -> bool:
 
 
 class CUDAOmniPlatform(CudaDeviceMixin, OmniPlatform):
+    def enable_breakable_prefill_graph(self) -> bool:
+        # Breakable prefill graphs read the stream capture status through
+        # cuda-python. CUDA is the platform that provides that path.
+        return True
+
     def _get_device_graph_backend(self) -> DeviceGraphBackend:
         from sglang_omni.platforms.device_graph import CudaDeviceGraphBackend
 
