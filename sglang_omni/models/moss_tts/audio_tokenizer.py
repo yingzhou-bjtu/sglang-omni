@@ -1560,13 +1560,15 @@ class MossAudioEncoder:
         self,
         paths: list[str | PathLike[str]],
     ) -> list[tuple[torch.Tensor, int]]:
-        import soundfile as sf
         import torchaudio
+
+        from sglang_omni.utils.audio import load_with_torchaudio
 
         waveforms = []
         for path in paths:
-            samples, sample_rate = sf.read(path, dtype="float32", always_2d=True)
-            waveform = torch.from_numpy(samples.T)
+            waveform, sample_rate = load_with_torchaudio(
+                str(path), source_name="reference"
+            )
             if int(sample_rate) != self.sample_rate:
                 waveform = torchaudio.functional.resample(
                     waveform=waveform,
