@@ -16,7 +16,6 @@ from sglang.srt.platforms.rocm import RocmSRTPlatform
 from sglang.srt.platforms.xpu import XpuSRTPlatform
 
 import sglang_omni.platforms as platforms
-import sglang_omni.platforms.musa as musa
 import sglang_omni.platforms.xpu as xpu_platform
 from sglang_omni.pipeline.stage_workers import StageLaunchConfig
 from sglang_omni.platforms.cpu import CPUOmniPlatform
@@ -65,18 +64,17 @@ def test_joint_rope_is_unavailable_without_a_platform_provider(
     cuda_provider.assert_not_called()
 
 
-def test_musa_joint_rope_getter_returns_the_native_provider(
+def test_musa_joint_rope_getter_returns_the_fused_rope_jit_kernel(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    cuda_provider = Mock(side_effect=AssertionError("Must not use NVIDIA provider"))
-    monkeypatch.setattr(
-        CUDAOmniPlatform, "get_joint_rope_inplace_kernel", cuda_provider
-    )
+    module_name = "sglang.kernels.ops.attention.rope"
+    rope_module = ModuleType(module_name)
+    kernel = Mock(side_effect=AssertionError("Getter must not execute the kernel"))
+    rope_module.apply_rope_inplace = kernel
+    monkeypatch.setitem(sys.modules, module_name, rope_module)
 
-    provider = platforms.MUSAOmniPlatform().get_joint_rope_inplace_kernel()
-
-    assert provider is musa.apply_rope_inplace
-    cuda_provider.assert_not_called()
+    assert platforms.MUSAOmniPlatform().get_joint_rope_inplace_kernel() is kernel
+    kernel.assert_not_called()
 
 
 def test_musa_runtime_platform_resolves_to_the_omni_musa_platform() -> None:
@@ -88,7 +86,9 @@ def test_musa_runtime_platform_resolves_to_the_omni_musa_platform() -> None:
     platform = platforms.as_omni_platform(MusaSRTPlatform())
 
     assert type(platform) is platforms.MUSAOmniPlatform
-    assert platform.get_joint_rope_inplace_kernel() is musa.apply_rope_inplace
+    assert platform.get_joint_rope_inplace_kernel is (
+        platforms.MUSAOmniPlatform.get_joint_rope_inplace_kernel
+    )
 
 
 def test_cuda_joint_rope_getter_returns_upstream_kernel_without_calling_it(
