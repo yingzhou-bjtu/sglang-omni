@@ -58,12 +58,11 @@ def test_qwen3_backbone_needs_no_shadow(tmp_path) -> None:
 
 def test_shadow_directory_is_removed_with_the_builder(tmp_path) -> None:
     backbone = _write_backbone(tmp_path / "qwen_7B" / "qwen_7B", "qwen3_moe")
+    (tmp_path / "flowmatching_vae.pth").write_bytes(b"dit")
     builder = MiniMaxMusic3EngineBuilder()
     builder.filter_audio_weights = lambda: None
 
-    builder.pre_infra_setup(str(backbone))
-
-    shadow_dir = Path(builder.checkpoint_dir)
+    shadow_dir = Path(builder.resolve_checkpoint(str(tmp_path)))
     assert shadow_dir != backbone
     assert shadow_dir.is_dir()
 

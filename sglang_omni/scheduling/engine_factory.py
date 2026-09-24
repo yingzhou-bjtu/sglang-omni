@@ -77,9 +77,6 @@ class SGLangGenerationEngineBuilder(ABC):
         self.dtype = dtype
 
         self.pre_infra_setup(checkpoint_dir)
-        # A hook may relocate the checkpoint (e.g. to a writable shadow copy of
-        # its config), so pick up whatever it settled on.
-        checkpoint_dir = self.checkpoint_dir
 
         if current_platform.is_cpu():
             # A stage default asking for a graph would otherwise fail inside

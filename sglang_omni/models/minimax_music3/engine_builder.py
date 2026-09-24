@@ -46,18 +46,19 @@ class MiniMaxMusic3EngineBuilder(TtsEngineBuilder):
 
         paths = resolve_checkpoint(model_path)
         self._checkpoint_root = str(paths.root)
-        return str(paths.qwen_dir)
-
-    def pre_infra_setup(self, checkpoint_dir: str) -> None:
+        checkpoint_dir = str(paths.qwen_dir)
         shadow_checkpoint = self.normalize_backbone_config(
             Path(checkpoint_dir) / "config.json"
         )
-        if shadow_checkpoint is not None:
-            # Hand the loader a writable shadow instead of the checkpoint.
-            self.checkpoint_dir = str(shadow_checkpoint)
-            # The shadow only has to outlive the load; tie its removal to the
-            # builder so a restart cannot leave one directory behind per start-up.
-            weakref.finalize(self, shutil.rmtree, shadow_checkpoint, ignore_errors=True)
+        if shadow_checkpoint is None:
+            return checkpoint_dir
+        # The shadow only has to outlive the load; tie its removal to the
+        # builder so a restart cannot leave one directory behind per start-up.
+        weakref.finalize(self, shutil.rmtree, shadow_checkpoint, ignore_errors=True)
+        return str(shadow_checkpoint)
+
+    def pre_infra_setup(self, checkpoint_dir: str) -> None:
+        del checkpoint_dir
         self.filter_audio_weights()
 
     def generation_defaults(self, *, dtype: str) -> dict[str, Any]:
