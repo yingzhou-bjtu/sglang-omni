@@ -5,6 +5,9 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
+import tempfile
+import weakref
 from pathlib import Path
 from typing import Any
 
@@ -43,10 +46,20 @@ class MiniMaxMusic3EngineBuilder(TtsEngineBuilder):
 
         paths = resolve_checkpoint(model_path)
         self._checkpoint_root = str(paths.root)
-        return str(paths.qwen_dir)
+        checkpoint_dir = str(paths.qwen_dir)
+        shadow_checkpoint = self.normalize_backbone_config(
+            Path(checkpoint_dir) / "config.json"
+        )
+        if shadow_checkpoint is None:
+            return checkpoint_dir
+        # The shadow only has to outlive the load; tie its removal to the
+        # builder so a restart cannot leave one directory behind per start-up.
+        weakref.finalize(self, shutil.rmtree, shadow_checkpoint, ignore_errors=True)
+        return str(shadow_checkpoint)
 
     def pre_infra_setup(self, checkpoint_dir: str) -> None:
-        self.normalize_backbone_config(Path(checkpoint_dir) / "config.json")
+        # The shared builder still passes the checkpoint directory; MiniMax
+        # already rewrote the backbone config in resolve_checkpoint.
         self.filter_audio_weights()
 
     def generation_defaults(self, *, dtype: str) -> dict[str, Any]:
@@ -173,20 +186,36 @@ class MiniMaxMusic3EngineBuilder(TtsEngineBuilder):
         }
 
     @staticmethod
-    def normalize_backbone_config(config_path: Path) -> None:
-        """Rewrite the backbone config so HuggingFace resolves a Qwen3 config."""
+    def normalize_backbone_config(config_path: Path) -> Path | None:
+        """Expose a Qwen3 backbone config without touching the checkpoint.
+
+        HuggingFace has to resolve the Qwen3 architecture, but the checkpoint's
+        ``config.json`` says something else. Rewriting that file in place - the
+        previous behaviour - edits the checkpoint itself: it fails outright when
+        the weights are mounted read-only, and on a Hub snapshot it replaces the
+        symlink into the shared blob store. Instead, mirror the backbone
+        directory with symlinks and patch only the copy, then let the caller
+        load through that shadow.
+        """
         config = json.loads(config_path.read_text())
         if config.get("model_type") == "qwen3":
-            return
-        backup_path = config_path.with_suffix(".json.bak")
-        if not backup_path.exists():
-            backup_path.write_text(config_path.read_text())
+            return None
+        backbone_dir = config_path.parent
+        # Keep the handle on the builder: the shadow only has to outlive the
+        # load, and weakref.finalize removes it when the builder is released
+        # instead of leaving one directory behind per start-up.
+        shadow_dir = Path(tempfile.mkdtemp(prefix="omni-minimax-music3-backbone-"))
+        for entry in backbone_dir.iterdir():
+            if entry.name == "config.json":
+                continue
+            (shadow_dir / entry.name).symlink_to(entry.resolve())
         config["model_type"] = "qwen3"
-        config_path.unlink()
-        config_path.write_text(json.dumps(config, indent=2))
+        (shadow_dir / "config.json").write_text(json.dumps(config, indent=2))
         logger.info(
-            f"MiniMax Music 3: rewrote {config_path} model_type to qwen3 (backup at {backup_path})"
+            f"MiniMax Music 3: loading the backbone through {shadow_dir} "
+            f"(model_type -> qwen3); the checkpoint is left untouched"
         )
+        return shadow_dir
 
     @staticmethod
     def filter_audio_weights() -> None:
