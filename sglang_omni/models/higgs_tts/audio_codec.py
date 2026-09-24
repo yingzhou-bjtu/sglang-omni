@@ -207,8 +207,8 @@ class HiggsAudioCodec:
         still use eager decode. Capture finishes before the stage becomes
         ready, so it cannot race SGLang's independently owned AR graphs.
         """
-        if self.device.type != "cuda":
-            raise RuntimeError("Higgs codec CUDA graphs require a CUDA device")
+        if self.device.type not in {"cuda", "musa"}:
+            raise RuntimeError("Higgs codec graphs require a CUDA or MUSA device")
         # Descending so the shared mempool is sized once from the largest shape
         # rather than grown across captures: 130 vs 146 MiB reserved on the
         # default 1..150 domain.
@@ -217,6 +217,8 @@ class HiggsAudioCodec:
             raise ValueError("decode CUDA graph frame counts must be positive")
 
         num_quantizers = int(self.model.config.num_quantizers)
+        # Keep the original CUDA stream and graph calls; MUSA already presents
+        # through them, so only the device guard needs to widen.
         current_stream = torch.cuda.current_stream(self.device)
         capture_stream = torch.cuda.Stream(device=self.device)
         capture_stream.wait_stream(current_stream)
