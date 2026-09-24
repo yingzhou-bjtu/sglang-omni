@@ -292,12 +292,20 @@ def create_audio_decode_executor(
     from sglang_omni.utils.device import resolve_concrete_device
 
     resolved_device = resolve_concrete_device(device, gpu_id)
-    if resolved_device.type != "cuda" or not torch.cuda.is_available():
+    if resolved_device.type not in {"cuda", "musa"}:
         raise ValueError(
-            "Ming-Omni-TTS fixed AudioVAE serving requires an available CUDA device"
+            "Ming-Omni-TTS fixed AudioVAE serving requires a CUDA or MUSA device"
+        )
+    # torch.cuda.is_available() still reports the CUDA runtime, so MUSA has to
+    # ask torch.musa for visibility. Stream and graph calls stay on torch.cuda.
+    runtime = torch.musa if resolved_device.type == "musa" else torch.cuda
+    if not runtime.is_available():
+        raise ValueError(
+            "Ming-Omni-TTS fixed AudioVAE serving requires an available "
+            f"{resolved_device.type.upper()} device"
         )
     logical_gpu_id = resolved_device.index
-    if logical_gpu_id >= torch.cuda.device_count():
+    if logical_gpu_id >= runtime.device_count():
         raise ValueError(
             f"Ming-Omni-TTS audio decode GPU {logical_gpu_id} is not visible"
         )

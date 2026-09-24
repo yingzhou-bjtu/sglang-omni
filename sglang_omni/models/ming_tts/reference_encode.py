@@ -7,7 +7,6 @@ from typing import Any
 
 import onnxruntime
 import torch
-import torchaudio
 import torchaudio.functional as F
 
 from sglang_omni.models.ming_omni.talker.audio_vae.modeling_audio_vae import AudioVAE
@@ -24,6 +23,7 @@ from sglang_omni.scheduling.reference_encoder import (
     KeyedReferenceEncodeHook,
     ReferenceEncodeService,
 )
+from sglang_omni.utils.audio import load_with_torchaudio
 from sglang_omni.utils.audio_features import cached_fbank
 
 
@@ -204,7 +204,7 @@ class MingTTSReferenceEncoder:
         return store_ming_tts_state(payload, state)
 
     def load_reference_waveform(self, path: str) -> tuple[Any, Any]:
-        waveform, sample_rate = torchaudio.load(path)
+        waveform, sample_rate = load_with_torchaudio(path, source_name="reference")
         if waveform.ndim != 2 or int(waveform.shape[0]) != 1:
             raise ValueError(
                 "Ming-Omni-TTS currently supports only mono reference audio, "
