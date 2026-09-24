@@ -328,6 +328,12 @@ def test_breakable_prefill_is_dropped_when_the_platform_declines_it(
     assert "cuda_graph_max_bs_prefill" not in overrides
 
 
+def test_musa_platform_declines_breakable_prefill_graphs() -> None:
+    from sglang_omni.platforms.musa import MUSAOmniPlatform
+
+    assert MUSAOmniPlatform().enable_breakable_prefill_graph() is False
+
+
 def test_prefill_cap_is_not_clamped_by_max_prefill_tokens() -> None:
     overrides = build_generation_batch_overrides(
         max_running_requests=4,
