@@ -6,13 +6,13 @@ import logging
 from sglang.srt.platforms.device_mixin import PlatformEnum
 
 from sglang_omni.platforms.cuda import CUDAOmniPlatform
-from sglang_omni.platforms.interface import OmniPlatform
+from sglang_omni.platforms.interface import JointRopeInplaceKernel, OmniPlatform
 
 logger = logging.getLogger(__name__)
 
 try:
     import torchada  # noqa: F401
-except ImportError as extra:
+except ImportError as exc:
     logger.warning(
         f"Failed to import torchada: {exc}. MUSA platform compatibility will not work."
     )
@@ -28,7 +28,7 @@ class MUSAOmniPlatform(CUDAOmniPlatform):
         # Use the native QK-norm + RoPE path on MUSA.
         return None
 
-    def get_joint_rope_inplace_kernel(self):
+    def get_joint_rope_inplace_kernel(self) -> JointRopeInplaceKernel:
         # note (yzxiao): Ming-TTS has no RotaryEmbedding.forward_native path,
         # so MUSA answers with the same fused-rope JIT kernel CUDA uses.
         from sglang.kernels.ops.attention.rope import apply_rope_inplace
