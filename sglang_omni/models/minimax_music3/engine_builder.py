@@ -58,7 +58,8 @@ class MiniMaxMusic3EngineBuilder(TtsEngineBuilder):
         return str(shadow_checkpoint)
 
     def pre_infra_setup(self, checkpoint_dir: str) -> None:
-        del checkpoint_dir
+        # The shared builder still passes the checkpoint directory; MiniMax
+        # already rewrote the backbone config in resolve_checkpoint.
         self.filter_audio_weights()
 
     def generation_defaults(self, *, dtype: str) -> dict[str, Any]:
@@ -201,7 +202,7 @@ class MiniMaxMusic3EngineBuilder(TtsEngineBuilder):
             return None
         backbone_dir = config_path.parent
         # Keep the handle on the builder: the shadow only has to outlive the
-        # load, and TemporaryDirectory removes it when the builder is released
+        # load, and weakref.finalize removes it when the builder is released
         # instead of leaving one directory behind per start-up.
         shadow_dir = Path(tempfile.mkdtemp(prefix="omni-minimax-music3-backbone-"))
         for entry in backbone_dir.iterdir():
@@ -211,9 +212,8 @@ class MiniMaxMusic3EngineBuilder(TtsEngineBuilder):
         config["model_type"] = "qwen3"
         (shadow_dir / "config.json").write_text(json.dumps(config, indent=2))
         logger.info(
-            "MiniMax Music 3: loading the backbone through %s (model_type -> qwen3); "
-            "the checkpoint is left untouched",
-            shadow_dir,
+            f"MiniMax Music 3: loading the backbone through {shadow_dir} "
+            f"(model_type -> qwen3); the checkpoint is left untouched"
         )
         return shadow_dir
 
