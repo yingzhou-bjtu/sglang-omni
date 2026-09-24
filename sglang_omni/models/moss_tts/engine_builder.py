@@ -13,6 +13,7 @@ from sglang_omni.models.moss_tts.hf_loading import (
     resolve_moss_tts_context_length,
 )
 from sglang_omni.scheduling.engine_factory import TtsEngineBuilder
+from sglang_omni.scheduling.generation_batch_policy import get_decode_cuda_graph_bs
 
 
 class MossTtsEngineBuilder(TtsEngineBuilder):
@@ -75,8 +76,12 @@ class MossTtsEngineBuilder(TtsEngineBuilder):
         self._model_runner = model_worker.model_runner
 
     def post_cuda_graph_setup(self, model: Any, server_args: Any) -> None:
-        del server_args
         graph_runner = self._model_runner.decode_cuda_graph_runner
+        if graph_runner is None:
+            # SGLang builds its decode graph runner on CUDA only, so MUSA sizes
+            # the sampling graphs from the resolved decode buckets instead.
+            model.init_sampling_graphs(list(get_decode_cuda_graph_bs(server_args)))
+            return
         model.init_sampling_graphs(
             list(graph_runner.capture_bs),
             disable_padding=graph_runner.disable_padding,
