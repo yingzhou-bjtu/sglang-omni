@@ -8,7 +8,6 @@ from typing import Any
 
 from sglang_omni.models.ming_omni.tp_utils import validate_attention_tp_config
 from sglang_omni.scheduling.engine_factory import TtsEngineBuilder
-from sglang_omni.scheduling.generation_batch_policy import get_decode_cuda_graph_bs
 
 logger = logging.getLogger(__name__)
 
@@ -188,19 +187,18 @@ class MingTtsEngineBuilder(TtsEngineBuilder):
         return int(model._decode_input_embedding.num_embeddings)
 
     def post_cuda_graph_setup(self, model: Any, server_args: Any) -> None:
+        del server_args
         # Note (yzxiao): Only the acoustic owner captures tail graphs because
         # follower ranks run the backbone graph without latent sampling.
         if self.tp_rank != 0:
             return
         runner = self._model_worker.model_runner.decode_cuda_graph_runner
-        # SGLang builds its decode graph runner on CUDA only, so MUSA sizes the
-        # tail graphs from the resolved decode buckets instead.
-        capture_bs = (
-            list(runner.capture_bs)
-            if runner is not None
-            else list(get_decode_cuda_graph_bs(server_args))
-        )
-        model.init_tail_graphs(capture_bs)
+        if runner is None:
+            raise RuntimeError(
+                "Ming-Omni-TTS requires SGLang decode graph runner "
+                "before capturing tail graphs"
+            )
+        model.init_tail_graphs(list(runner.capture_bs))
 
     def make_model_runner(self, model_worker: Any, output_proc: Any) -> Any:
         from sglang_omni.models.ming_tts.model_runner import MingTTSModelRunner
