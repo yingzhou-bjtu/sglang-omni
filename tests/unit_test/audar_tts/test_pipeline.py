@@ -11,6 +11,7 @@ import threading
 import time
 import types
 import wave
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -89,6 +90,21 @@ def five_second_wav(sample_value: int = 0) -> bytes:
         wav.setframerate(16000)
         wav.writeframes(np.full(80000, sample_value, dtype="<i2").tobytes())
     return output.getvalue()
+
+
+def _install_fake_neucodec(
+    monkeypatch: pytest.MonkeyPatch, *, neu_codec: object, **model_members: object
+) -> None:
+    """Install a package-shaped stand-in so ``import neucodec.model`` works."""
+    package = types.ModuleType("neucodec")
+    package.__path__ = []  # mark as a package, like the real distribution
+    package.NeuCodec = neu_codec
+    model_module = types.ModuleType("neucodec.model")
+    for name, value in model_members.items():
+        setattr(model_module, name, value)
+    package.model = model_module
+    monkeypatch.setitem(sys.modules, "neucodec", package)
+    monkeypatch.setitem(sys.modules, "neucodec.model", model_module)
 
 
 def test_prompt_matches_official_audar_protocol() -> None:
@@ -703,9 +719,7 @@ def test_codec_model_and_lock_are_shared_between_stages(
             loads += 1
             return codec
 
-    monkeypatch.setitem(
-        sys.modules, "neucodec", types.SimpleNamespace(NeuCodec=FakeNeuCodec)
-    )
+    _install_fake_neucodec(monkeypatch, neu_codec=FakeNeuCodec)
     stages.load_codec.cache_clear()
     stages.codec_lock.cache_clear()
     try:
@@ -720,6 +734,118 @@ def test_codec_model_and_lock_are_shared_between_stages(
     assert first is second is codec
     assert first_lock is second_lock
     assert loads == 1
+
+
+def test_load_codec_constructs_a_local_directory_snapshot(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """NeuCodec.from_pretrained rejects local directories, so the stage must
+    construct the module from pytorch_model.bin and the sibling Wav2Vec2-BERT
+    snapshot."""
+    codec_dir = tmp_path / "neucodec"
+    codec_dir.mkdir()
+    (codec_dir / "pytorch_model.bin").write_bytes(b"unused")
+    w2v_dir = tmp_path / "facebook_w2v_bert_2_0"
+    w2v_dir.mkdir()
+    captured: dict[str, object] = {}
+    codec = FakeCodec()
+    loads = 0
+
+    def fake_from_pretrained(name: str, *args: Any, **kwargs: Any) -> str:
+        captured.setdefault("pretrained", []).append((name, dict(kwargs)))
+        return f"loaded:{name}"
+
+    class FakeNeuCodec:
+        def __init__(self, sample_rate: int, hop_length: int) -> None:
+            captured["sample_rate"] = sample_rate
+            captured["hop_length"] = hop_length
+            nonlocal loads
+            loads += 1
+            import neucodec.model as neucodec_model
+
+            neucodec_model.Wav2Vec2BertModel.from_pretrained("facebook/w2v-bert-2.0")
+            neucodec_model.AutoFeatureExtractor.from_pretrained("facebook/w2v-bert-2.0")
+
+        def eval(self) -> "FakeNeuCodec":
+            return self
+
+        def to(self, device: str) -> FakeCodec:
+            captured["device"] = device
+            return codec
+
+        def load_state_dict(self, state_dict: dict[str, object], strict: bool) -> None:
+            captured["state_dict"] = state_dict
+            captured["strict"] = strict
+
+        @classmethod
+        def from_pretrained(cls, *args: Any, **kwargs: Any) -> FakeCodec:
+            raise AssertionError("local directories must not call from_pretrained")
+
+    _install_fake_neucodec(
+        monkeypatch,
+        neu_codec=FakeNeuCodec,
+        Wav2Vec2BertModel=types.SimpleNamespace(from_pretrained=fake_from_pretrained),
+        AutoFeatureExtractor=types.SimpleNamespace(
+            from_pretrained=fake_from_pretrained
+        ),
+    )
+    monkeypatch.setattr(
+        stages.torch, "load", lambda *args, **kwargs: {"fc_post_s": 1, "ok": 2}
+    )
+    stages.load_codec.cache_clear()
+    try:
+        loaded = stages.load_codec(str(codec_dir), "main", "cpu")
+    finally:
+        stages.load_codec.cache_clear()
+
+    assert loaded is codec
+    assert loads == 1
+    assert captured["sample_rate"] == 24000
+    assert captured["hop_length"] == 480
+    assert captured["device"] == "cpu"
+    assert captured["state_dict"] == {"ok": 2}
+    assert captured["strict"] is False
+    names = [name for name, _ in captured["pretrained"]]
+    assert names == [str(w2v_dir), str(w2v_dir)]
+    assert all(
+        kwargs["local_files_only"] is True for _, kwargs in captured["pretrained"]
+    )
+
+
+def test_load_codec_restores_pretrained_methods_after_constructor_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    codec_dir = tmp_path / "neucodec"
+    codec_dir.mkdir()
+    (codec_dir / "pytorch_model.bin").write_bytes(b"unused")
+    w2v_dir = tmp_path / "facebook_w2v_bert_2_0"
+    w2v_dir.mkdir()
+
+    def original_from_pretrained(name: str, *args: Any, **kwargs: Any) -> str:
+        return name
+
+    class FailingNeuCodec:
+        def __init__(self, sample_rate: int, hop_length: int) -> None:
+            raise RuntimeError("constructor failed")
+
+    w2v_model = types.SimpleNamespace(from_pretrained=original_from_pretrained)
+    feature_extractor = types.SimpleNamespace(from_pretrained=original_from_pretrained)
+    _install_fake_neucodec(
+        monkeypatch,
+        neu_codec=FailingNeuCodec,
+        Wav2Vec2BertModel=w2v_model,
+        AutoFeatureExtractor=feature_extractor,
+    )
+    monkeypatch.setattr(stages.torch, "load", lambda *args, **kwargs: {"ok": 2})
+    stages.load_codec.cache_clear()
+    try:
+        with pytest.raises(RuntimeError, match="constructor failed"):
+            stages.load_codec(str(codec_dir), "main", "cpu")
+    finally:
+        stages.load_codec.cache_clear()
+
+    assert w2v_model.from_pretrained is original_from_pretrained
+    assert feature_extractor.from_pretrained is original_from_pretrained
 
 
 def test_llama_cpp_stage_keeps_a_cpu_resolution_off_the_gpu(
@@ -751,6 +877,34 @@ def test_llama_cpp_stage_keeps_a_cpu_resolution_off_the_gpu(
     assert captured["main_gpu"] == 0
 
 
+def test_llama_cpp_stage_keeps_a_musa_resolution_off_the_gpu(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """llama.cpp binds a CUDA main_gpu index; a MUSA host must not offload."""
+    captured: dict[str, object] = {}
+
+    class FakeLlama:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            raise RuntimeError("stop after capture")
+
+    from sglang_omni.platforms import current_platform
+
+    monkeypatch.setitem(
+        sys.modules,
+        "llama_cpp",
+        types.SimpleNamespace(LLAMA_SPLIT_MODE_NONE=0, Llama=FakeLlama),
+    )
+    monkeypatch.setattr(stages, "resolve_gguf", lambda *args: "/model.gguf")
+    monkeypatch.setattr(current_platform, "device_type", "musa", raising=False)
+
+    with pytest.raises(RuntimeError, match="stop after capture"):
+        stages.create_tts_engine_executor("unused", gpu_id=1)
+
+    assert captured["n_gpu_layers"] == 0
+    assert captured["main_gpu"] == 0
+
+
 def test_llama_cpp_stage_rejects_a_device_it_cannot_serve(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -764,7 +918,7 @@ def test_llama_cpp_stage_rejects_a_device_it_cannot_serve(
         types.SimpleNamespace(LLAMA_SPLIT_MODE_NONE=0, Llama=object),
     )
     monkeypatch.setattr(current_platform, "device_type", "xpu", raising=False)
-    with pytest.raises(ValueError, match="cuda or cpu"):
+    with pytest.raises(ValueError, match="cuda, musa, or cpu"):
         stages.create_tts_engine_executor("unused", device="xpu", gpu_id=1)
 
 
