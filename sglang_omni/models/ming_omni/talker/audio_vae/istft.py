@@ -67,7 +67,7 @@ class ISTFT(nn.Module):
             spec = spec * valid_frame_mask.unsqueeze(1)
 
         if spec.device.type == "musa":
-            from torchada._mufft import musa_irfft_graph
+            from torchada import musa_irfft_graph
 
             inverse = musa_irfft_graph(spec, self.n_fft)
         else:

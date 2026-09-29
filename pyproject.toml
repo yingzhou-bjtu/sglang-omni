@@ -98,6 +98,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+musa = [
+    "torchada>=0.1.87",
+]
 audar-tts = [
     "llama-cpp-python==0.3.34",
     "neucodec==0.0.6",

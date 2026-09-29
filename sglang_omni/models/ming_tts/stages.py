@@ -296,14 +296,25 @@ def create_audio_decode_executor(
         raise ValueError(
             "Ming-Omni-TTS fixed AudioVAE serving requires a CUDA or MUSA device"
         )
-    # torch.cuda.is_available() still reports the CUDA runtime, so MUSA has to
-    # ask torch.musa for visibility. Stream and graph calls stay on torch.cuda.
     runtime = torch.musa if resolved_device.type == "musa" else torch.cuda
     if not runtime.is_available():
         raise ValueError(
             "Ming-Omni-TTS fixed AudioVAE serving requires an available "
             f"{resolved_device.type.upper()} device"
         )
+    if resolved_device.type == "musa":
+        try:
+            from torchada import musa_irfft_graph
+        except ImportError as exc:
+            raise RuntimeError(
+                "Ming-Omni-TTS on MUSA requires torchada>=0.1.87 "
+                "with graph-safe muFFT support"
+            ) from exc
+        if not callable(musa_irfft_graph):
+            raise RuntimeError(
+                "Ming-Omni-TTS on MUSA requires torchada>=0.1.87 "
+                "with graph-safe muFFT support"
+            )
     logical_gpu_id = resolved_device.index
     if logical_gpu_id >= runtime.device_count():
         raise ValueError(
