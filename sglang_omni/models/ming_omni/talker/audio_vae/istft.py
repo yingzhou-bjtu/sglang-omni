@@ -74,7 +74,12 @@ class ISTFT(nn.Module):
         else:
             pass
 
-        inverse = torch.fft.irfft(spec, self.n_fft, dim=1, norm="backward")
+        if spec.device.type == "musa":
+            from torchada import musa_irfft_graph
+
+            inverse = musa_irfft_graph(spec, self.n_fft)
+        else:
+            inverse = torch.fft.irfft(spec, self.n_fft, dim=1, norm="backward")
         window = self.window if window is None else window
         inverse = inverse * window[None, :, None]
 

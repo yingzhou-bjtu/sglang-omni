@@ -8,7 +8,6 @@ from typing import Any
 
 from sglang_omni.models.ming_omni.tp_utils import validate_attention_tp_config
 from sglang_omni.scheduling.engine_factory import TtsEngineBuilder
-from sglang_omni.scheduling.generation_batch_policy import get_decode_cuda_graph_bs
 
 logger = logging.getLogger(__name__)
 
@@ -223,10 +222,14 @@ class MingTtsEngineBuilder(TtsEngineBuilder):
         # follower ranks run the backbone graph without latent sampling.
         if self.tp_rank != 0:
             return
-        else:
-            pass
+        runner = self.model_worker.model_runner.decode_cuda_graph_runner
+        if runner is None:
+            raise RuntimeError(
+                "Ming-Omni-TTS requires SGLang decode graph runner "
+                "before capturing tail graphs"
+            )
         model.init_tail_graphs(
-            list(self.model_worker.model_runner.decode_cuda_graph_runner.capture_bs)
+            list(runner.capture_bs)
         )
 
     def make_model_runner(self, model_worker: Any, output_proc: Any) -> Any:
