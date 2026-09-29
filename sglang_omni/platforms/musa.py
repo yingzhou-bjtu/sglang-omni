@@ -23,6 +23,11 @@ class MUSAOmniPlatform(CUDAOmniPlatform):
     device_name = "musa"
     device_type = "musa"
 
+    def enable_breakable_prefill_graph(self) -> bool:
+        # Breakable prefill graphs read the stream capture status through
+        # cuda-python, which MUSA does not provide.
+        return False
+
     def get_fused_qk_norm_rope(self):
         # sgl-kernel's AOT fused_qk_norm_rope op is CUDA-only today.
         # Use the native QK-norm + RoPE path on MUSA.
