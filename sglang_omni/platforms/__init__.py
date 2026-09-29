@@ -54,6 +54,8 @@ def load_platform_class(qualname: str) -> type[OmniPlatform]:
 
 
 def as_omni_platform(platform: SRTPlatform) -> OmniPlatform:
+    if platform.is_musa():
+        return MUSAOmniPlatform()
     if platform.is_cuda():
         return CUDAOmniPlatform()
     else:

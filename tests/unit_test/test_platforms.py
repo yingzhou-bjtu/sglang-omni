@@ -49,7 +49,6 @@ class VendorSRTPlatform(SRTPlatform, VendorDeviceMixin):
         ROCMOmniPlatform,
         XPUOmniPlatform,
         platforms.NPUOmniPlatform,
-        platforms.MUSAOmniPlatform,
         platforms.AppleOmniPlatform,
     ],
 )
@@ -63,6 +62,60 @@ def test_joint_rope_is_unavailable_without_a_platform_provider(
 
     assert platform_type().get_joint_rope_inplace_kernel() is None
     cuda_provider.assert_not_called()
+
+
+def test_musa_joint_rope_getter_returns_the_fused_rope_jit_kernel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "torchada", ModuleType("torchada"))
+    module_name = "sglang.kernels.ops.attention.rope"
+    rope_module = ModuleType(module_name)
+    kernel = Mock(side_effect=AssertionError("Getter must not execute the kernel"))
+    rope_module.apply_rope_inplace = kernel
+    monkeypatch.setitem(sys.modules, module_name, rope_module)
+
+    assert platforms.MUSAOmniPlatform().get_joint_rope_inplace_kernel() is kernel
+    kernel.assert_not_called()
+
+
+def test_musa_joint_rope_fails_fast_without_torchada(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_import = builtins.__import__
+
+    def import_without_torchada(name, *args, **kwargs):
+        if name == "torchada":
+            raise ImportError("torchada is not installed")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", import_without_torchada)
+
+    with pytest.raises(RuntimeError, match="requires torchada"):
+        platforms.MUSAOmniPlatform().get_joint_rope_inplace_kernel()
+
+
+def test_musa_runtime_platform_resolves_to_the_omni_musa_platform() -> None:
+    class MusaSRTPlatform(SRTPlatform):
+        _enum = PlatformEnum.MUSA
+        device_name = "musa"
+        device_type = "musa"
+
+    platform = platforms.as_omni_platform(MusaSRTPlatform())
+
+    assert type(platform) is platforms.MUSAOmniPlatform
+
+
+def test_musa_platform_precedes_cuda_compatible_alias() -> None:
+    class MusaCudaAliasSRTPlatform(SRTPlatform):
+        def is_musa(self) -> bool:
+            return True
+
+        def is_cuda(self) -> bool:
+            return True
+
+    assert type(platforms.as_omni_platform(MusaCudaAliasSRTPlatform())) is (
+        platforms.MUSAOmniPlatform
+    )
 
 
 def test_cuda_joint_rope_getter_returns_upstream_kernel_without_calling_it(
