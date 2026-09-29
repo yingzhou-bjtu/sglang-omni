@@ -12,6 +12,8 @@ from sglang.srt.arg_groups.model_override_base import resolved_view
 from sglang.srt.model_executor.cuda_graph_config import Backend as CudaGraphBackend
 from sglang.srt.model_executor.cuda_graph_config import CudaGraphConfig
 
+from sglang_omni.platforms import current_platform
+
 logger = logging.getLogger(__name__)
 
 _MISSING = object()
@@ -209,6 +211,15 @@ def build_generation_batch_overrides(
         overrides.pop("cuda_graph_max_bs_prefill", None)
     else:
         pass
+
+    if (
+        overrides.get("cuda_graph_backend_prefill") == CudaGraphBackend.BREAKABLE
+        and not current_platform.enable_breakable_prefill_graph()
+    ):
+        raise ValueError(
+            f"{current_platform.device_type} does not support "
+            "cuda_graph_backend_prefill='breakable'; use 'disabled' or run on CUDA."
+        )
 
     prefill_bs = overrides.get("cuda_graph_bs_prefill")
     prefill_max_bs = overrides.get("cuda_graph_max_bs_prefill")

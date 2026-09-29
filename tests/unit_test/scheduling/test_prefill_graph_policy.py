@@ -20,6 +20,26 @@ from sglang_omni.scheduling.generation_batch_policy import (
 from sglang_omni.vendor.sglang.server_args import override_server_args
 
 
+@pytest.fixture
+def breakable_prefill_capable_platform(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the cases below independent of the machine running them.
+
+    `build_generation_batch_overrides` asks the platform whether breakable
+    prefill graphs are available, so the default here matches a device that
+    serves them; the platform that answers "no" has its own case below.
+    """
+    from sglang_omni.scheduling import generation_batch_policy
+
+    monkeypatch.setattr(
+        generation_batch_policy,
+        "current_platform",
+        SimpleNamespace(
+            device_type="cuda",
+            enable_breakable_prefill_graph=lambda: True,
+        ),
+    )
+
+
 def make_server_args(
     *,
     prefill_backend: str = "disabled",
@@ -247,7 +267,9 @@ def test_breakable_rejects_sglang_incompatible_features(
         validate(server_args)
 
 
-def test_nested_prefill_bs_composes_as_operator_buckets() -> None:
+def test_nested_prefill_bs_composes_as_operator_buckets(
+    breakable_prefill_capable_platform,
+) -> None:
     overrides = build_generation_batch_overrides(
         max_running_requests=4,
         server_args_overrides={
@@ -260,7 +282,9 @@ def test_nested_prefill_bs_composes_as_operator_buckets() -> None:
     assert overrides["cuda_graph_max_bs_prefill"] == 256
 
 
-def test_nested_prefill_max_bs_composes_as_a_flat_cap() -> None:
+def test_nested_prefill_max_bs_composes_as_a_flat_cap(
+    breakable_prefill_capable_platform,
+) -> None:
     overrides = build_generation_batch_overrides(
         max_running_requests=4,
         server_args_overrides={"cuda_graph_config": {"prefill": {"max_bs": 512}}},
@@ -270,7 +294,9 @@ def test_nested_prefill_max_bs_composes_as_a_flat_cap() -> None:
     assert "cuda_graph_bs_prefill" not in overrides
 
 
-def test_breakable_prefill_cap_builds_the_shared_default_ladder() -> None:
+def test_breakable_prefill_cap_builds_the_shared_default_ladder(
+    breakable_prefill_capable_platform,
+) -> None:
     overrides = build_generation_batch_overrides(
         max_running_requests=4,
         server_args_overrides={
@@ -285,7 +311,49 @@ def test_breakable_prefill_cap_builds_the_shared_default_ladder() -> None:
     )
 
 
-def test_prefill_cap_is_not_clamped_by_max_prefill_tokens() -> None:
+def test_breakable_prefill_is_rejected_when_the_platform_declines_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sglang_omni.scheduling import generation_batch_policy
+
+    monkeypatch.setattr(
+        generation_batch_policy,
+        "current_platform",
+        SimpleNamespace(
+            device_type="musa",
+            enable_breakable_prefill_graph=lambda: False,
+        ),
+    )
+    with pytest.raises(
+        ValueError,
+        match="musa does not support cuda_graph_backend_prefill='breakable'",
+    ):
+        build_generation_batch_overrides(
+            max_running_requests=4,
+            server_args_overrides={
+                "cuda_graph_backend_prefill": "breakable",
+                "cuda_graph_max_bs_prefill": 512,
+            },
+        )
+
+
+def test_musa_platform_declines_breakable_prefill_graphs() -> None:
+    from sglang_omni.platforms.musa import MUSAOmniPlatform
+
+    assert MUSAOmniPlatform().enable_breakable_prefill_graph() is False
+
+
+def test_generic_platform_declines_breakable_prefill_graphs() -> None:
+    from sglang_omni.platforms.cpu import CPUOmniPlatform
+    from sglang_omni.platforms.cuda import CUDAOmniPlatform
+
+    assert CPUOmniPlatform().enable_breakable_prefill_graph() is False
+    assert CUDAOmniPlatform().enable_breakable_prefill_graph() is True
+
+
+def test_prefill_cap_is_not_clamped_by_max_prefill_tokens(
+    breakable_prefill_capable_platform,
+) -> None:
     overrides = build_generation_batch_overrides(
         max_running_requests=4,
         server_args_overrides={
@@ -310,7 +378,9 @@ def test_prefill_cap_is_not_clamped_by_max_prefill_tokens() -> None:
     ],
 )
 def test_explicit_prefill_caps_build_the_ladder_before_server_args(
-    server_args_overrides: dict[str, Any], expected_cap: int
+    server_args_overrides: dict[str, Any],
+    expected_cap: int,
+    breakable_prefill_capable_platform,
 ) -> None:
     overrides = build_generation_batch_overrides(
         max_running_requests=4,
@@ -340,6 +410,7 @@ def test_explicit_prefill_caps_build_the_ladder_before_server_args(
 )
 def test_unset_or_disabled_prefill_caps_leave_the_ladder_to_sglang(
     server_args_overrides: dict[str, Any],
+    breakable_prefill_capable_platform,
 ) -> None:
     overrides = build_generation_batch_overrides(
         max_running_requests=4,
@@ -354,7 +425,9 @@ def test_unset_or_disabled_prefill_caps_leave_the_ladder_to_sglang(
 
 @pytest.mark.parametrize(("cap", "expected_top"), [(128, 128), (100, 100)])
 def test_nested_prefill_max_bs_trims_a_stage_default_ladder(
-    cap: int, expected_top: int
+    cap: int,
+    expected_top: int,
+    breakable_prefill_capable_platform,
 ) -> None:
     overrides = build_generation_batch_overrides(
         max_running_requests=4,
@@ -367,7 +440,9 @@ def test_nested_prefill_max_bs_trims_a_stage_default_ladder(
     assert all(bucket <= cap for bucket in overrides["cuda_graph_bs_prefill"])
 
 
-def test_operator_prefill_cap_below_its_own_list_is_rejected() -> None:
+def test_operator_prefill_cap_below_its_own_list_is_rejected(
+    breakable_prefill_capable_platform,
+) -> None:
     with pytest.raises(ValueError, match="below the declared cuda_graph_bs_prefill"):
         build_generation_batch_overrides(
             max_running_requests=4,
@@ -378,7 +453,9 @@ def test_operator_prefill_cap_below_its_own_list_is_rejected() -> None:
         )
 
 
-def test_operator_prefill_cap_above_its_list_is_kept() -> None:
+def test_operator_prefill_cap_above_its_list_is_kept(
+    breakable_prefill_capable_platform,
+) -> None:
     overrides = build_generation_batch_overrides(
         max_running_requests=4,
         server_args_overrides={
@@ -391,7 +468,9 @@ def test_operator_prefill_cap_above_its_list_is_kept() -> None:
     assert overrides["cuda_graph_max_bs_prefill"] == 512
 
 
-def test_nested_disabled_backend_overrides_a_stage_default() -> None:
+def test_nested_disabled_backend_overrides_a_stage_default(
+    breakable_prefill_capable_platform,
+) -> None:
     overrides = build_generation_batch_overrides(
         max_running_requests=4,
         cuda_graph_backend_prefill="breakable",
@@ -403,7 +482,9 @@ def test_nested_disabled_backend_overrides_a_stage_default() -> None:
     assert overrides["cuda_graph_backend_prefill"] == "disabled"
 
 
-def test_conflicting_flat_and_nested_prefill_overrides_are_rejected() -> None:
+def test_conflicting_flat_and_nested_prefill_overrides_are_rejected(
+    breakable_prefill_capable_platform,
+) -> None:
     with pytest.raises(ValueError, match="Conflicting"):
         build_generation_batch_overrides(
             max_running_requests=4,
@@ -481,7 +562,9 @@ def test_default_prefill_ladder_appends_the_off_grid_cap_sglang_omits(
     assert build_default_prefill_cuda_graph_bs(cap) == [*sglang_ladder, cap]
 
 
-def test_overrides_derive_prefill_max_bs_from_buckets() -> None:
+def test_overrides_derive_prefill_max_bs_from_buckets(
+    breakable_prefill_capable_platform,
+) -> None:
     overrides = build_generation_batch_overrides(
         max_running_requests=4,
         server_args_overrides={
@@ -504,7 +587,9 @@ def test_overrides_derive_prefill_max_bs_from_buckets() -> None:
     assert explicit["cuda_graph_max_bs_prefill"] == 256
 
 
-def test_disable_overrides_win_over_default_prefill_backend() -> None:
+def test_disable_overrides_win_over_default_prefill_backend(
+    breakable_prefill_capable_platform,
+) -> None:
     stage_defaults = {
         "cuda_graph_backend_prefill": "breakable",
         "cuda_graph_bs_prefill": [128, 256],
@@ -689,7 +774,9 @@ def test_builder_rejects_breakable_without_model_opt_in(monkeypatch) -> None:
         )
 
 
-def test_raised_operator_cap_extends_a_stage_ladder_without_dropping_buckets() -> None:
+def test_raised_operator_cap_extends_a_stage_ladder_without_dropping_buckets(
+    breakable_prefill_capable_platform,
+) -> None:
     """A raised cap must grow a stage ladder, not replace it with the shared one.
 
     The stage ladders carry buckets the shared one does not, such as the
@@ -713,7 +800,9 @@ def test_raised_operator_cap_extends_a_stage_ladder_without_dropping_buckets() -
     assert len(result) == len(set(result))
 
 
-def test_raised_operator_cap_leaves_an_operator_declared_ladder_alone() -> None:
+def test_raised_operator_cap_leaves_an_operator_declared_ladder_alone(
+    breakable_prefill_capable_platform,
+) -> None:
     """When the operator declares both, they own the pair."""
     overrides = build_generation_batch_overrides(
         max_running_requests=4,
