@@ -36,7 +36,7 @@ def test_ming_tts_abort_callback_resets_runner_state() -> None:
 def test_ming_tts_requires_decode_graph_runner_for_tail_graphs() -> None:
     builder = object.__new__(MingTtsEngineBuilder)
     builder.tp_rank = 0
-    builder._model_worker = type(
+    builder._model_worker = type(  # noqa: leading-underscore
         "ModelWorker",
         (),
         {"model_runner": type("ModelRunner", (), {"decode_cuda_graph_runner": None})()},
