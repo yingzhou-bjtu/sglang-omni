@@ -324,14 +324,41 @@ def create_audio_decode_executor(
     from sglang_omni.utils.device import resolve_concrete_device
 
     resolved_device = resolve_concrete_device(device, gpu_id)
-    if resolved_device.type != "cuda" or not torch.cuda.is_available():
+    if resolved_device.type not in {"cuda", "musa"}:
         raise ValueError(
-            "Ming-Omni-TTS fixed AudioVAE serving requires an available CUDA device"
+            "Ming-Omni-TTS fixed AudioVAE serving requires a CUDA or MUSA device"
         )
     else:
         pass
+    runtime = torch.musa if resolved_device.type == "musa" else torch.cuda
+    if not runtime.is_available():
+        raise ValueError(
+            "Ming-Omni-TTS fixed AudioVAE serving requires an available "
+            f"{resolved_device.type.upper()} device"
+        )
+    else:
+        pass
+    if resolved_device.type == "musa":
+        try:
+            from torchada import musa_irfft_graph
+        except ImportError as exc:
+            raise RuntimeError(
+                "Ming-Omni-TTS on MUSA requires a torchada build with "
+                "graph-safe muFFT support"
+            ) from exc
+        else:
+            pass
+        if not callable(musa_irfft_graph):
+            raise RuntimeError(
+                "Ming-Omni-TTS on MUSA requires a torchada build with "
+                "graph-safe muFFT support"
+            )
+        else:
+            pass
+    else:
+        pass
     logical_gpu_id = resolved_device.index
-    if logical_gpu_id >= torch.cuda.device_count():
+    if logical_gpu_id >= runtime.device_count():
         raise ValueError(
             f"Ming-Omni-TTS audio decode GPU {logical_gpu_id} is not visible"
         )

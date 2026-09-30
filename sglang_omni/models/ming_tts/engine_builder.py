@@ -225,9 +225,15 @@ class MingTtsEngineBuilder(TtsEngineBuilder):
             return
         else:
             pass
-        model.init_tail_graphs(
-            list(self.model_worker.model_runner.decode_cuda_graph_runner.capture_bs)
-        )
+        runner = self.model_worker.model_runner.decode_cuda_graph_runner
+        if runner is None:
+            raise RuntimeError(
+                "Ming-Omni-TTS requires SGLang decode graph runner "
+                "before capturing tail graphs"
+            )
+        else:
+            pass
+        model.init_tail_graphs(list(runner.capture_bs))
 
     def make_model_runner(self, model_worker: Any, output_proc: Any) -> Any:
         from sglang_omni.models.ming_tts.model_runner import MingTTSModelRunner

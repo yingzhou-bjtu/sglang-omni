@@ -95,8 +95,9 @@ class MingAudioDecoder:
         device = first_parameter.device
         dtype = first_parameter.dtype
         context = (
-            torch.autocast(device_type="cuda", dtype=dtype)
-            if device.type == "cuda" and dtype in (torch.float16, torch.bfloat16)
+            torch.autocast(device_type=device.type, dtype=dtype)
+            if device.type in {"cuda", "musa"}
+            and dtype in (torch.float16, torch.bfloat16)
             else nullcontext()
         )
         with context:
@@ -282,12 +283,15 @@ class AudioVAEFixedStreamingTransition:
         device = first_parameter.device
         input_dtype = first_parameter.dtype
         if decoder.training or not (
-            device.type == "cuda"
+            device.type in {"cuda", "musa"}
             and input_dtype == torch.bfloat16
             or (device.type == "cpu" and input_dtype == torch.float32)
         ):
             raise ValueError(
-                f"AudioVAE fixed streaming requires an eval-mode CUDA BF16 decoder for serving or an eval-mode CPU FP32 decoder for internal verification, got device={device}, dtype={input_dtype}, training={decoder.training}"
+                "AudioVAE fixed streaming requires an eval-mode CUDA or MUSA BF16 "
+                "decoder for serving or an eval-mode CPU FP32 decoder for "
+                f"internal verification, got device={device}, "
+                f"dtype={input_dtype}, training={decoder.training}"
             )
         else:
             pass
@@ -309,8 +313,8 @@ class AudioVAEFixedStreamingTransition:
             self.max_raw_samples - self.pad
         )  # noqa: leading-underscore
         reference_context = (
-            torch.autocast(device_type="cuda", dtype=input_dtype)
-            if device.type == "cuda"
+            torch.autocast(device_type=device.type, dtype=input_dtype)
+            if device.type in {"cuda", "musa"}
             else nullcontext()
         )
         with torch.inference_mode(), reference_context:
@@ -408,8 +412,8 @@ class AudioVAEFixedStreamingTransition:
         terminal_mask: torch.Tensor,
     ) -> AudioVAEFixedStreamingOutput:
         execution_context = (
-            torch.autocast(device_type="cuda", dtype=self.input_dtype)
-            if self.device.type == "cuda"
+            torch.autocast(device_type=self.device.type, dtype=self.input_dtype)
+            if self.device.type in {"cuda", "musa"}
             else nullcontext()
         )
         with torch.inference_mode(), execution_context:

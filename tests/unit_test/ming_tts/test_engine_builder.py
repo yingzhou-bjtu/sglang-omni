@@ -33,6 +33,27 @@ def test_ming_tts_abort_callback_resets_runner_state() -> None:
     assert runner.request_states == {}
 
 
+def test_ming_tts_requires_decode_graph_runner_for_tail_graphs() -> None:
+    builder = object.__new__(MingTtsEngineBuilder)
+    builder.tp_rank = 0
+    builder._model_worker = type(  # noqa: leading-underscore
+        "ModelWorker",
+        (),
+        {"model_runner": type("ModelRunner", (), {"decode_cuda_graph_runner": None})()},
+    )()
+    model = type(
+        "Model",
+        (),
+        {"init_tail_graphs": lambda self, batch_sizes: None},
+    )()
+
+    with pytest.raises(
+        RuntimeError,
+        match="requires SGLang decode graph runner",
+    ):
+        builder.post_cuda_graph_setup(model, server_args=None)
+
+
 @pytest.mark.parametrize(
     "key",
     ["disable_overlap_schedule", "disable_radix_cache"],
