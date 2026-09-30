@@ -4,7 +4,7 @@ from __future__ import annotations
 from sglang.srt.platforms.device_mixin import PlatformEnum
 
 from sglang_omni.platforms.cuda import CUDAOmniPlatform
-from sglang_omni.platforms.interface import JointRopeInplaceKernel, OmniPlatform
+from sglang_omni.platforms.interface import OmniPlatform
 
 
 class MUSAOmniPlatform(CUDAOmniPlatform):
@@ -16,13 +16,6 @@ class MUSAOmniPlatform(CUDAOmniPlatform):
         # sgl-kernel's AOT fused_qk_norm_rope op is CUDA-only today.
         # Use the native QK-norm + RoPE path on MUSA.
         return None
-
-    def get_joint_rope_inplace_kernel(self) -> JointRopeInplaceKernel:
-        # note (yzxiao): Ming-TTS has no RotaryEmbedding.forward_native path,
-        # so MUSA answers with the same fused-rope JIT kernel CUDA uses.
-        from sglang.kernels.ops.attention.rope import apply_rope_inplace
-
-        return apply_rope_inplace
 
     def apply_model_worker_backend_policy(
         self,

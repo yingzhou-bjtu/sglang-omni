@@ -64,20 +64,6 @@ def test_joint_rope_is_unavailable_without_a_platform_provider(
     cuda_provider.assert_not_called()
 
 
-def test_musa_joint_rope_getter_returns_the_fused_rope_jit_kernel(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setitem(sys.modules, "torchada", ModuleType("torchada"))
-    module_name = "sglang.kernels.ops.attention.rope"
-    rope_module = ModuleType(module_name)
-    kernel = Mock(side_effect=AssertionError("Getter must not execute the kernel"))
-    rope_module.apply_rope_inplace = kernel
-    monkeypatch.setitem(sys.modules, module_name, rope_module)
-
-    assert platforms.MUSAOmniPlatform().get_joint_rope_inplace_kernel() is kernel
-    kernel.assert_not_called()
-
-
 def test_musa_runtime_platform_resolves_to_the_omni_musa_platform() -> None:
     class MusaSRTPlatform(SRTPlatform):
         _enum = PlatformEnum.MUSA
