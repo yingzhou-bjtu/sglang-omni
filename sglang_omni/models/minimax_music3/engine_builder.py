@@ -5,6 +5,9 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
+import tempfile
+import weakref
 from pathlib import Path
 from typing import Any
 
@@ -39,16 +42,30 @@ class MiniMaxMusic3EngineBuilder(TtsEngineBuilder):
             pass
         self.model_runner: Any | None = None
         self.checkpoint_root: str | None = None
+        self.shadow_checkpoint: Path | None = None
+        self.shadow_cleanup: weakref.finalize | None = None
 
     def resolve_checkpoint(self, model_path: str) -> str:
         from .checkpoint import resolve_checkpoint
 
         paths = resolve_checkpoint(model_path)
         self.checkpoint_root = str(paths.root)
-        return str(paths.qwen_dir)
+        checkpoint_dir = Path(paths.qwen_dir)
+        if self.shadow_cleanup is not None:
+            self.shadow_cleanup()
+            self.shadow_cleanup = None
+            self.shadow_checkpoint = None
+        shadow_checkpoint = self.normalize_backbone_config(checkpoint_dir / "config.json")
+        if shadow_checkpoint is None:
+            return str(checkpoint_dir)
+        self.shadow_checkpoint = shadow_checkpoint
+        self.shadow_cleanup = weakref.finalize(
+            self, shutil.rmtree, shadow_checkpoint, ignore_errors=True
+        )
+        return str(shadow_checkpoint)
 
     def pre_infra_setup(self, checkpoint_dir: str) -> None:
-        self.normalize_backbone_config(Path(checkpoint_dir) / "config.json")
+        del checkpoint_dir
         self.filter_audio_weights()
 
     def generation_defaults(self, *, dtype: str) -> dict[str, Any]:
@@ -183,24 +200,24 @@ class MiniMaxMusic3EngineBuilder(TtsEngineBuilder):
         }
 
     @staticmethod
-    def normalize_backbone_config(config_path: Path) -> None:
-        """Rewrite the backbone config so HuggingFace resolves a Qwen3 config."""
+    def normalize_backbone_config(config_path: Path) -> Path | None:
+        """Patch a shadow directory so the read-only checkpoint stays unchanged."""
         config = json.loads(config_path.read_text())
         if config.get("model_type") == "qwen3":
-            return
+            return None
         else:
             pass
-        backup_path = config_path.with_suffix(".json.bak")
-        if not backup_path.exists():
-            backup_path.write_text(config_path.read_text())
-        else:
-            pass
+        shadow_dir = Path(tempfile.mkdtemp(prefix="omni-minimax-music3-backbone-"))
+        for entry in config_path.parent.iterdir():
+            if entry.name != "config.json":
+                (shadow_dir / entry.name).symlink_to(entry.resolve())
         config["model_type"] = "qwen3"
-        config_path.unlink()
-        config_path.write_text(json.dumps(config, indent=2))
+        (shadow_dir / "config.json").write_text(json.dumps(config, indent=2))
         logger.info(
-            f"MiniMax Music 3: rewrote {config_path} model_type to qwen3 (backup at {backup_path})"
+            f"MiniMax Music 3: loading the backbone through {shadow_dir} "
+            "without modifying the checkpoint"
         )
+        return shadow_dir
 
     @staticmethod
     def filter_audio_weights() -> None:
