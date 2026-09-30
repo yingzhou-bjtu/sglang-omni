@@ -20,12 +20,6 @@ class MUSAOmniPlatform(CUDAOmniPlatform):
     def get_joint_rope_inplace_kernel(self) -> JointRopeInplaceKernel:
         # note (yzxiao): Ming-TTS has no RotaryEmbedding.forward_native path,
         # so MUSA answers with the same fused-rope JIT kernel CUDA uses.
-        try:
-            import torchada  # noqa: F401
-        except ImportError as exc:
-            raise RuntimeError(
-                "MUSA joint RoPE requires torchada with SGLang JIT support"
-            ) from exc
         from sglang.kernels.ops.attention.rope import apply_rope_inplace
 
         return apply_rope_inplace

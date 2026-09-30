@@ -78,22 +78,6 @@ def test_musa_joint_rope_getter_returns_the_fused_rope_jit_kernel(
     kernel.assert_not_called()
 
 
-def test_musa_joint_rope_fails_fast_without_torchada(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    original_import = builtins.__import__
-
-    def import_without_torchada(name, *args, **kwargs):
-        if name == "torchada":
-            raise ImportError("torchada is not installed")
-        return original_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", import_without_torchada)
-
-    with pytest.raises(RuntimeError, match="requires torchada"):
-        platforms.MUSAOmniPlatform().get_joint_rope_inplace_kernel()
-
-
 def test_musa_runtime_platform_resolves_to_the_omni_musa_platform() -> None:
     class MusaSRTPlatform(SRTPlatform):
         _enum = PlatformEnum.MUSA
