@@ -49,7 +49,6 @@ class VendorSRTPlatform(SRTPlatform, VendorDeviceMixin):
         ROCMOmniPlatform,
         XPUOmniPlatform,
         platforms.NPUOmniPlatform,
-        platforms.MUSAOmniPlatform,
         platforms.AppleOmniPlatform,
     ],
 )
