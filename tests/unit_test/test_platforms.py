@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
+import importlib
+import sys
 from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -115,17 +117,42 @@ def test_rocm_platform_without_hip_visibility_sets_only_the_cuda_alias() -> None
     assert platform.get_stage_process_env(spec, {})["CUDA_VISIBLE_DEVICES"] == "0"
 
 
-def test_musa_joint_rope_uses_torchada_provider(
+def test_musa_joint_rope_uses_torchada_sglang_compat(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    rope = importlib.import_module("sglang.kernels.ops.attention.rope")
     kernel = Mock()
-    monkeypatch.setattr(
-        musa_platform,
+
+    def install_sglang_rope_compat() -> None:
+        rope.apply_rope_inplace = kernel
+
+    monkeypatch.setitem(
+        sys.modules,
         "torchada",
-        SimpleNamespace(apply_rope_inplace=kernel),
+        SimpleNamespace(install_sglang_rope_compat=install_sglang_rope_compat),
     )
 
-    assert musa_platform.MUSAOmniPlatform().get_joint_rope_inplace_kernel() is kernel
+    platform = musa_platform.MUSAOmniPlatform()
+
+    assert platform.get_joint_rope_inplace_kernel() is kernel
+
+
+def test_musa_joint_rope_fails_fast_without_torchada(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "torchada", None)
+
+    with pytest.raises(RuntimeError, match="requires a TorchADA version"):
+        musa_platform.MUSAOmniPlatform()
+
+
+def test_musa_joint_rope_fails_fast_without_provider_api(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "torchada", SimpleNamespace())
+
+    with pytest.raises(RuntimeError, match="version with SGLang compatibility"):
+        musa_platform.MUSAOmniPlatform()
 
 
 def test_rocm_talker_keeps_auto_moe_backend() -> None:
