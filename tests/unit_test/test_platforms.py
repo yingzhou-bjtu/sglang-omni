@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 import torch
@@ -13,6 +14,7 @@ from sglang.srt.platforms.rocm import RocmSRTPlatform
 from sglang.srt.platforms.xpu import XpuSRTPlatform
 
 import sglang_omni.platforms as platforms
+import sglang_omni.platforms.musa as musa_platform
 import sglang_omni.platforms.xpu as xpu_platform
 from sglang_omni.pipeline.stage_workers import StageLaunchConfig
 from sglang_omni.platforms.cpu import CPUOmniPlatform
@@ -111,6 +113,19 @@ def test_rocm_platform_without_hip_visibility_sets_only_the_cuda_alias() -> None
 
     assert "HIP_VISIBLE_DEVICES" not in platform.get_stage_process_env(spec, {})
     assert platform.get_stage_process_env(spec, {})["CUDA_VISIBLE_DEVICES"] == "0"
+
+
+def test_musa_joint_rope_uses_torchada_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    kernel = Mock()
+    monkeypatch.setattr(
+        musa_platform,
+        "torchada",
+        SimpleNamespace(apply_rope_inplace=kernel),
+    )
+
+    assert musa_platform.MUSAOmniPlatform().get_joint_rope_inplace_kernel() is kernel
 
 
 def test_rocm_talker_keeps_auto_moe_backend() -> None:
