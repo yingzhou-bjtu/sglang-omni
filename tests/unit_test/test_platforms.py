@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import importlib
-import sys
 from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -117,19 +116,16 @@ def test_rocm_platform_without_hip_visibility_sets_only_the_cuda_alias() -> None
     assert platform.get_stage_process_env(spec, {})["CUDA_VISIBLE_DEVICES"] == "0"
 
 
-def test_musa_joint_rope_uses_torchada_sglang_compat(
+def test_musa_joint_rope_uses_torchada_auto_patch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     rope = importlib.import_module("sglang.kernels.ops.attention.rope")
     kernel = Mock()
-
-    def install_sglang_rope_compat() -> None:
-        rope.apply_rope_inplace = kernel
-
-    monkeypatch.setitem(
-        sys.modules,
+    monkeypatch.setattr(rope, "apply_rope_inplace", kernel)
+    monkeypatch.setattr(
+        musa_platform,
         "torchada",
-        SimpleNamespace(install_sglang_rope_compat=install_sglang_rope_compat),
+        SimpleNamespace(apply_rope_inplace=kernel),
     )
 
     platform = musa_platform.MUSAOmniPlatform()
@@ -140,7 +136,7 @@ def test_musa_joint_rope_uses_torchada_sglang_compat(
 def test_musa_joint_rope_fails_fast_without_torchada(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setitem(sys.modules, "torchada", None)
+    monkeypatch.setattr(musa_platform, "torchada", None)
     platform = musa_platform.MUSAOmniPlatform()
 
     with pytest.raises(RuntimeError, match="torchada>=0.1.101"):
@@ -150,10 +146,10 @@ def test_musa_joint_rope_fails_fast_without_torchada(
 def test_musa_joint_rope_fails_fast_without_provider_api(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setitem(sys.modules, "torchada", SimpleNamespace())
+    monkeypatch.setattr(musa_platform, "torchada", SimpleNamespace())
     platform = musa_platform.MUSAOmniPlatform()
 
-    with pytest.raises(RuntimeError, match="install_sglang_rope_compat"):
+    with pytest.raises(RuntimeError, match="SGLang import compatibility patch"):
         platform.get_joint_rope_inplace_kernel()
 
 
