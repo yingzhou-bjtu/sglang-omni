@@ -141,18 +141,20 @@ def test_musa_joint_rope_fails_fast_without_torchada(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setitem(sys.modules, "torchada", None)
+    platform = musa_platform.MUSAOmniPlatform()
 
-    with pytest.raises(RuntimeError, match="requires a TorchADA version"):
-        musa_platform.MUSAOmniPlatform()
+    with pytest.raises(RuntimeError, match="torchada>=0.1.101"):
+        platform.get_joint_rope_inplace_kernel()
 
 
 def test_musa_joint_rope_fails_fast_without_provider_api(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setitem(sys.modules, "torchada", SimpleNamespace())
+    platform = musa_platform.MUSAOmniPlatform()
 
-    with pytest.raises(RuntimeError, match="version with SGLang compatibility"):
-        musa_platform.MUSAOmniPlatform()
+    with pytest.raises(RuntimeError, match="install_sglang_rope_compat"):
+        platform.get_joint_rope_inplace_kernel()
 
 
 def test_rocm_talker_keeps_auto_moe_backend() -> None:
