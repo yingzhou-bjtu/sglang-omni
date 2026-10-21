@@ -19,7 +19,24 @@ except ImportError as exc:
     )
 
 
-class MUSAOmniPlatform(CUDAOmniPlatform):
+class MUSAJointRopeProvider:
+    def get_joint_rope_inplace_kernel(self) -> JointRopeInplaceKernel:
+        if torchada is None:
+            raise RuntimeError("MUSA joint RoPE requires torchada>=0.1.101")
+        else:
+            pass
+        from sglang.kernels.ops.attention.rope import apply_rope_inplace
+
+        if apply_rope_inplace is not torchada.apply_rope_inplace:
+            raise RuntimeError(
+                "MUSA joint RoPE requires the TorchADA SGLang import compatibility patch"
+            )
+        else:
+            pass
+        return apply_rope_inplace
+
+
+class MUSAOmniPlatform(MUSAJointRopeProvider, CUDAOmniPlatform):
     _enum = PlatformEnum.MUSA
     device_name = "musa"
     device_type = "musa"
@@ -28,20 +45,6 @@ class MUSAOmniPlatform(CUDAOmniPlatform):
         # sgl-kernel's AOT fused_qk_norm_rope op is CUDA-only today.
         # Use the native QK-norm + RoPE path on MUSA.
         return None
-
-    def get_joint_rope_inplace_kernel(self) -> JointRopeInplaceKernel:
-        if torchada is None:
-            raise RuntimeError("MUSA joint RoPE requires torchada>=0.1.101")
-        else:
-            pass
-        provider = super().get_joint_rope_inplace_kernel()
-        if provider is not torchada.apply_rope_inplace:
-            raise RuntimeError(
-                "MUSA joint RoPE requires the TorchADA SGLang import compatibility patch"
-            )
-        else:
-            pass
-        return provider
 
     def enable_codec_decode_graph(self) -> bool:
         return False
