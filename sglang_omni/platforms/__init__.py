@@ -58,6 +58,10 @@ def as_omni_platform(platform: SRTPlatform) -> OmniPlatform:
         return CUDAOmniPlatform()
     else:
         pass
+    if platform.is_musa():
+        return MUSAOmniPlatform()
+    else:
+        pass
     if platform.is_rocm():
         return ROCMOmniPlatform()
     else:
