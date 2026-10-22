@@ -140,20 +140,23 @@ def test_ming_tts_owns_tail_execution_geometry(
     kernel.assert_not_called()
 
 
-def test_ming_tts_rejects_missing_joint_rope() -> None:
+def test_ming_tts_rejects_missing_joint_rope_before_building_backbone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sglang_omni import platforms
     from sglang_omni.models.ming_tts import sglang_model
 
-    joint_rope_provider = sglang_model.current_platform.get_joint_rope_inplace_kernel()
-    if joint_rope_provider is not None:
-        pytest.skip("requires a platform without a joint RoPE provider")
-    else:
-        pass
+    backbone = Mock(side_effect=AssertionError("Backbone must not be built"))
+    monkeypatch.setattr(sglang_model, "MingBailingMoeTextModel", backbone)
+    monkeypatch.setattr(sglang_model, "current_platform", platforms.CPUOmniPlatform())
 
     with pytest.raises(
         RuntimeError,
         match="Ming-TTS requires a joint in-place RoPE kernel",
     ):
         sglang_model.MingTTSSGLangModel(SimpleNamespace())
+
+    backbone.assert_not_called()
 
 
 @pytest.mark.parametrize(
