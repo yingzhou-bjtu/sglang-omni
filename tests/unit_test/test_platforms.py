@@ -53,11 +53,12 @@ def test_cuda_tp_stage_env_is_the_narrowing_plus_nvls_off() -> None:
     }
 
 
-def test_musa_platform_inherits_cuda_joint_rope_provider() -> None:
-    assert (
-        platforms.MUSAOmniPlatform.get_joint_rope_inplace_kernel
-        is CUDAOmniPlatform.get_joint_rope_inplace_kernel
-    )
+def test_musa_platform_exposes_torchada_joint_rope_provider() -> None:
+    torchada = pytest.importorskip("torchada")
+
+    provider = platforms.MUSAOmniPlatform().get_joint_rope_inplace_kernel()
+
+    assert provider is torchada.apply_rope_inplace
 
 
 def test_rocm_platform_keeps_cuda_compatible_tp_mapping() -> None:

@@ -1,7 +1,9 @@
 # Coding style
 
 This document describes the coding style for human contributors and AI agents.
-Sources: the [style prompt and do/don't examples](https://github.com/zhaochenyang20/sglang-diffusion-routing/issues/32#issuecomment-5651721937)
+Canonical source: the [Code Review Style Guide](https://github.com/zhaochenyang20/sglang-diffusion-routing/issues/32).
+The `$fwq-shell` repository review contract applies this document as the SGLang-Omni coding-style gate.
+Adopted examples: the [style prompt](https://github.com/zhaochenyang20/sglang-diffusion-routing/issues/32#issuecomment-5651721937)
 and [additional anti-pattern examples](https://github.com/zhaochenyang20/sglang-diffusion-routing/issues/32#issuecomment-5650093336),
 including [discarded parameters](https://github.com/zhaochenyang20/sglang-diffusion-routing/issues/32#issuecomment-5673011724)
 and [f-strings plus no backticks in comments](https://github.com/zhaochenyang20/sglang-diffusion-routing/issues/32#issuecomment-5734141980).
@@ -213,6 +215,10 @@ section below is the rule.
   probes to hide missing required attributes, or catch attribute errors for
   operations guaranteed by the interface. Missing required attributes should fail
   visibly rather than trigger a search for alternate fields or fallback defaults.
+- Do not use `setattr` to create or replace a required interface member when
+  explicit inheritance, direct assignment, or a named compatibility API can
+  express the contract. Runtime-generated registration is acceptable only when
+  the dynamic name belongs to the owned interface.
 
 ## CONTROL FLOW
 
