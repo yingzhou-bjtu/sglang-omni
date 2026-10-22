@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
-import importlib
 from contextlib import nullcontext
 from types import SimpleNamespace
 
@@ -14,9 +13,7 @@ from sglang.srt.platforms.rocm import RocmSRTPlatform
 from sglang.srt.platforms.xpu import XpuSRTPlatform
 
 import sglang_omni.platforms as platforms
-import sglang_omni.platforms.musa as musa_platform
 import sglang_omni.platforms.xpu as xpu_platform
-from sglang_omni.comm.data_ref import TransportKind
 from sglang_omni.pipeline.stage_workers import StageLaunchConfig
 from sglang_omni.platforms.cpu import CPUOmniPlatform
 from sglang_omni.platforms.cuda import CUDAOmniPlatform
@@ -41,12 +38,6 @@ class VendorSRTPlatform(SRTPlatform, VendorDeviceMixin):
     pass
 
 
-class MusaTestSRTPlatform(SRTPlatform):
-    _enum = PlatformEnum.MUSA
-    device_name = "musa"
-    device_type = "musa"
-
-
 def test_cuda_tp_stage_env_is_the_narrowing_plus_nvls_off() -> None:
     spec = StageLaunchConfig(stage_name="thinker", tp_size=2, gpu_id=1)
 
@@ -62,66 +53,11 @@ def test_cuda_tp_stage_env_is_the_narrowing_plus_nvls_off() -> None:
     }
 
 
-def test_musa_platform_resolves_to_the_omni_musa_platform() -> None:
-    platform = platforms.as_omni_platform(MusaTestSRTPlatform())
-
-    assert not isinstance(platform, platforms.MUSAOmniPlatform)
-    assert platform.is_musa()
-    assert platform.get_intra_node_transport() is TransportKind.SHM
-
-
-def test_musa_joint_rope_uses_the_torchada_sglang_provider(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def provider(
-        query: torch.Tensor,
-        key: torch.Tensor,
-        cos_sin_cache: torch.Tensor,
-        positions: torch.Tensor,
-        *,
-        is_neox: bool,
-    ) -> None:
-        pass
-
-    rope = importlib.import_module("sglang.kernels.ops.attention.rope")
-    monkeypatch.setattr(rope, "apply_rope_inplace", provider)
-    monkeypatch.setattr(
-        musa_platform,
-        "torchada",
-        SimpleNamespace(apply_rope_inplace=provider),
+def test_musa_platform_inherits_cuda_joint_rope_provider() -> None:
+    assert (
+        platforms.MUSAOmniPlatform.get_joint_rope_inplace_kernel
+        is CUDAOmniPlatform.get_joint_rope_inplace_kernel
     )
-
-    platform = platforms.as_omni_platform(MusaTestSRTPlatform())
-
-    assert platform.get_joint_rope_inplace_kernel() is provider
-
-
-def test_musa_joint_rope_fails_fast_without_torchada(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(musa_platform, "torchada", None)
-    platform = platforms.as_omni_platform(MusaTestSRTPlatform())
-
-    with pytest.raises(RuntimeError, match="torchada>=0.1.101"):
-        platform.get_joint_rope_inplace_kernel()
-
-
-def test_musa_joint_rope_rejects_an_unpatched_sglang_provider(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    torchada_provider = object()
-    sglang_provider = object()
-    rope = importlib.import_module("sglang.kernels.ops.attention.rope")
-    monkeypatch.setattr(rope, "apply_rope_inplace", sglang_provider)
-    monkeypatch.setattr(
-        musa_platform,
-        "torchada",
-        SimpleNamespace(apply_rope_inplace=torchada_provider),
-    )
-    platform = platforms.as_omni_platform(MusaTestSRTPlatform())
-
-    with pytest.raises(RuntimeError, match="SGLang import compatibility patch"):
-        platform.get_joint_rope_inplace_kernel()
 
 
 def test_rocm_platform_keeps_cuda_compatible_tp_mapping() -> None:

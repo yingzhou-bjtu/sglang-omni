@@ -6,37 +6,19 @@ import logging
 from sglang.srt.platforms.device_mixin import PlatformEnum
 
 from sglang_omni.platforms.cuda import CUDAOmniPlatform
-from sglang_omni.platforms.interface import JointRopeInplaceKernel, OmniPlatform
+from sglang_omni.platforms.interface import OmniPlatform
 
 logger = logging.getLogger(__name__)
 
 try:
-    import torchada
+    import torchada  # noqa: F401
 except ImportError as exc:
-    torchada = None
     logger.warning(
         f"Failed to import torchada: {exc}. MUSA platform compatibility will not work."
     )
 
 
-class MUSAJointRopeProvider:
-    def get_joint_rope_inplace_kernel(self) -> JointRopeInplaceKernel:
-        if torchada is None:
-            raise RuntimeError("MUSA joint RoPE requires torchada>=0.1.101")
-        else:
-            pass
-        from sglang.kernels.ops.attention.rope import apply_rope_inplace
-
-        if apply_rope_inplace is not torchada.apply_rope_inplace:
-            raise RuntimeError(
-                "MUSA joint RoPE requires the TorchADA SGLang import compatibility patch"
-            )
-        else:
-            pass
-        return apply_rope_inplace
-
-
-class MUSAOmniPlatform(MUSAJointRopeProvider, CUDAOmniPlatform):
+class MUSAOmniPlatform(CUDAOmniPlatform):
     _enum = PlatformEnum.MUSA
     device_name = "musa"
     device_type = "musa"

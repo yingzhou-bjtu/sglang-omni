@@ -4,14 +4,13 @@ import platform as host_platform
 
 import torch
 from sglang.srt import platforms as srt_platforms
-from sglang.srt.platforms.device_mixin import PlatformEnum
 from sglang.srt.platforms.interface import SRTPlatform
 
 from sglang_omni.platforms.apple import AppleOmniPlatform
 from sglang_omni.platforms.cpu import CPUOmniPlatform
 from sglang_omni.platforms.cuda import CUDAOmniPlatform
 from sglang_omni.platforms.interface import OmniPlatform
-from sglang_omni.platforms.musa import MUSAJointRopeProvider, MUSAOmniPlatform
+from sglang_omni.platforms.musa import MUSAOmniPlatform
 from sglang_omni.platforms.npu import NPUOmniPlatform
 from sglang_omni.platforms.rocm import ROCMOmniPlatform
 from sglang_omni.platforms.xpu import XPUOmniPlatform
@@ -47,14 +46,9 @@ def load_platform_class(qualname: str) -> type[OmniPlatform]:
         raise TypeError(f"Expected an SRTPlatform subclass: {qualname}")
     else:
         pass
-    platform_bases = (cls, OmniPlatform)
-    if cls._enum == PlatformEnum.MUSA:  # noqa: leading-underscore
-        platform_bases = (MUSAJointRopeProvider, cls, OmniPlatform)
-    else:
-        pass
     return type(
         f"Omni{cls.__name__}",
-        platform_bases,
+        (cls, OmniPlatform),
         {"_omni_platform_qualname": qualname},
     )
 
