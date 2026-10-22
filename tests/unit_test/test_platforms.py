@@ -53,12 +53,12 @@ def test_cuda_tp_stage_env_is_the_narrowing_plus_nvls_off() -> None:
     }
 
 
-def test_musa_platform_exposes_torchada_joint_rope_provider() -> None:
-    torchada = pytest.importorskip("torchada")
+def test_musa_platform_exposes_joint_rope_provider() -> None:
+    provider_package = pytest.importorskip("torchada")
 
     joint_rope_provider = platforms.MUSAOmniPlatform().get_joint_rope_inplace_kernel()
 
-    assert joint_rope_provider is torchada.apply_rope_inplace
+    assert joint_rope_provider is provider_package.apply_rope_inplace
 
 
 def test_rocm_platform_keeps_cuda_compatible_tp_mapping() -> None:
