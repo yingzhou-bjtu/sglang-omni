@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
+import importlib.util
 from contextlib import nullcontext
 from types import SimpleNamespace
 
@@ -53,12 +54,23 @@ def test_cuda_tp_stage_env_is_the_narrowing_plus_nvls_off() -> None:
     }
 
 
+def test_musa_platform_omits_joint_rope_without_torchada() -> None:
+    if importlib.util.find_spec("torchada") is not None:
+        pytest.skip("TorchADA is installed")
+    else:
+        pass
+
+    joint_rope_provider = platforms.MUSAOmniPlatform().get_joint_rope_inplace_kernel()
+
+    assert joint_rope_provider is None
+
+
 def test_musa_platform_exposes_torchada_joint_rope_provider() -> None:
     torchada = pytest.importorskip("torchada")
 
-    provider = platforms.MUSAOmniPlatform().get_joint_rope_inplace_kernel()
+    joint_rope_provider = platforms.MUSAOmniPlatform().get_joint_rope_inplace_kernel()
 
-    assert provider is torchada.apply_rope_inplace
+    assert joint_rope_provider is torchada.apply_rope_inplace
 
 
 def test_rocm_platform_keeps_cuda_compatible_tp_mapping() -> None:
