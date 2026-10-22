@@ -152,7 +152,7 @@ def test_ming_tts_rejects_missing_joint_rope_before_building_backbone(
 
     with pytest.raises(
         RuntimeError,
-        match="Ming-TTS requires.*CPUOmniPlatform does not provide one",
+        match="Ming-TTS requires a joint in-place RoPE kernel",
     ):
         sglang_model.MingTTSSGLangModel(SimpleNamespace())
 
