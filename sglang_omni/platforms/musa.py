@@ -11,6 +11,7 @@ from sglang_omni.platforms.interface import OmniPlatform
 logger = logging.getLogger(__name__)
 
 try:
+    # note (yingzhou-bjtu): Import installs the TorchADA RoPE provider patch used by the inherited getter.
     import torchada  # noqa: F401
 except ImportError as exc:
     logger.warning(
