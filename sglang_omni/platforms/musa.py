@@ -24,8 +24,7 @@ class MUSAOmniPlatform(CUDAOmniPlatform):
     device_type = "musa"
 
     def enable_breakable_prefill_graph(self) -> bool:
-        # Breakable prefill graphs read the stream capture status through
-        # cuda-python, which MUSA does not provide.
+        # note (yingzhou): MUSA does not provide the cuda-python capture-state path.
         return False
 
     def get_fused_qk_norm_rope(self):
@@ -33,10 +32,8 @@ class MUSAOmniPlatform(CUDAOmniPlatform):
         # Use the native QK-norm + RoPE path on MUSA.
         return None
 
-    def get_joint_rope_inplace_kernel(self) -> None:
-        # Note(yzxiao): Do not inherit NVIDIA's joint-RoPE provider; MUSA needs
-        # its own implementation and validation of this capability.
-        return None
+    def enable_codec_decode_graph(self) -> bool:
+        return False
 
     def apply_model_worker_backend_policy(
         self,
