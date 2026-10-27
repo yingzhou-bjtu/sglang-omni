@@ -222,6 +222,17 @@ def test_each_platform_names_the_graph_backend_its_hardware_uses() -> None:
             assert isinstance(backend, backend_class), platform_class.__name__
 
 
+def test_platforms_declare_breakable_prefill_support() -> None:
+    expected = {
+        OmniPlatform: False,
+        CUDAOmniPlatform: True,
+        platforms.MUSAOmniPlatform: False,
+    }
+
+    for platform_type, supported in expected.items():
+        assert platform_type().enable_breakable_prefill_graph() is supported
+
+
 def test_a_platform_declines_a_device_that_is_not_its_own() -> None:
     """A caller holding a tensor's device does not have to check that first."""
     platform = CUDAOmniPlatform()

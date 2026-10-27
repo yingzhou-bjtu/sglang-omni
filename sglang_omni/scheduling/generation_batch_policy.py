@@ -261,7 +261,8 @@ def build_generation_batch_overrides(
     ):
         raise ValueError(
             f"{current_platform.device_type} does not support "
-            "cuda_graph_backend_prefill='breakable'; use 'disabled' or run on CUDA."
+            "cuda_graph_backend_prefill='breakable'; set it to 'disabled' or use "
+            "a platform that enables it."
         )
     else:
         pass

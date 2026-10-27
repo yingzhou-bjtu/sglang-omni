@@ -14,9 +14,6 @@ from sglang.srt.arg_groups.cuda_graph_hook import (
 from typing_extensions import TypedDict, Unpack
 
 from sglang_omni.platforms import current_platform
-from sglang_omni.platforms.cpu import CPUOmniPlatform
-from sglang_omni.platforms.cuda import CUDAOmniPlatform
-from sglang_omni.platforms.musa import MUSAOmniPlatform
 from sglang_omni.scheduling.generation_batch_policy import (
     GenerationStageDefaults,
     build_default_prefill_cuda_graph_bs,
@@ -297,8 +294,20 @@ def test_nested_prefill_bs_composes_as_operator_buckets() -> None:
     assert overrides["cuda_graph_max_bs_prefill"] == 256
 
 
+@pytest.mark.parametrize(
+    "server_args_overrides",
+    [
+        {
+            "cuda_graph_backend_prefill": "breakable",
+            "cuda_graph_max_bs_prefill": 512,
+        },
+        {"cuda_graph_config": {"prefill": {"backend": "breakable", "max_bs": 512}}},
+    ],
+    ids=["flat", "nested"],
+)
 def test_breakable_prefill_is_rejected_when_the_platform_declines_it(
     monkeypatch: pytest.MonkeyPatch,
+    server_args_overrides: dict[str, Any],
 ) -> None:
     monkeypatch.setattr(
         current_platform, "enable_breakable_prefill_graph", lambda: False
@@ -306,21 +315,30 @@ def test_breakable_prefill_is_rejected_when_the_platform_declines_it(
 
     with pytest.raises(
         ValueError,
-        match="does not support cuda_graph_backend_prefill='breakable'",
+        match="set it to 'disabled' or use a platform that enables it",
     ):
         build_generation_batch_overrides(
             max_running_requests=4,
-            server_args_overrides={
-                "cuda_graph_backend_prefill": "breakable",
-                "cuda_graph_max_bs_prefill": 512,
-            },
+            server_args_overrides=server_args_overrides,
         )
 
 
-def test_platforms_declare_breakable_prefill_support() -> None:
-    assert CPUOmniPlatform().enable_breakable_prefill_graph() is False
-    assert CUDAOmniPlatform().enable_breakable_prefill_graph() is True
-    assert MUSAOmniPlatform().enable_breakable_prefill_graph() is False
+def test_full_prefill_is_not_gated_by_breakable_support(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        current_platform, "enable_breakable_prefill_graph", lambda: False
+    )
+
+    overrides = build_generation_batch_overrides(
+        max_running_requests=4,
+        server_args_overrides={
+            "cuda_graph_backend_prefill": "full",
+            "cuda_graph_max_bs_prefill": 512,
+        },
+    )
+
+    assert overrides["cuda_graph_backend_prefill"] == "full"
 
 
 def test_prefill_cap_is_not_clamped_by_max_prefill_tokens() -> None:
