@@ -30,11 +30,7 @@ class AttentionBackendOverrides(TypedDict, total=False):
 
 @pytest.fixture(autouse=True)
 def breakable_prefill_capable_platform(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        current_platform,
-        "enable_breakable_prefill_graph",
-        lambda: True,
-    )
+    monkeypatch.setattr(current_platform, "is_cuda", lambda: True)
 
 
 def make_server_args(
@@ -309,9 +305,7 @@ def test_breakable_prefill_is_rejected_when_the_platform_declines_it(
     monkeypatch: pytest.MonkeyPatch,
     server_args_overrides: dict[str, Any],
 ) -> None:
-    monkeypatch.setattr(
-        current_platform, "enable_breakable_prefill_graph", lambda: False
-    )
+    monkeypatch.setattr(current_platform, "is_cuda", lambda: False)
 
     with pytest.raises(
         ValueError,
@@ -326,9 +320,7 @@ def test_breakable_prefill_is_rejected_when_the_platform_declines_it(
 def test_full_prefill_is_not_gated_by_breakable_support(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        current_platform, "enable_breakable_prefill_graph", lambda: False
-    )
+    monkeypatch.setattr(current_platform, "is_cuda", lambda: False)
 
     overrides = build_generation_batch_overrides(
         max_running_requests=4,

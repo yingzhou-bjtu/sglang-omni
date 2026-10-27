@@ -139,10 +139,6 @@ class OmniPlatform(DeviceMixin):
     def enable_thinker_decode_graph(self) -> bool:
         return True
 
-    def enable_breakable_prefill_graph(self) -> bool:
-        """Whether this platform can capture breakable prefill graphs."""
-        return False
-
     def enable_zonos2_torch_compile(self) -> bool:
         return True
 
