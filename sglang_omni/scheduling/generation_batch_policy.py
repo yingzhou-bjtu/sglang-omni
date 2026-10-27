@@ -255,9 +255,10 @@ def build_generation_batch_overrides(
     else:
         pass
 
-    if (
-        overrides.get("cuda_graph_backend_prefill") == CudaGraphBackend.BREAKABLE
-        and not current_platform.is_cuda()
+    if overrides.get(
+        "cuda_graph_backend_prefill"
+    ) == CudaGraphBackend.BREAKABLE and not (
+        current_platform.is_cuda() or current_platform.is_musa()
     ):
         raise ValueError(
             f"{current_platform.device_type} does not support "

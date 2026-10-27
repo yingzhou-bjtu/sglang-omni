@@ -306,6 +306,7 @@ def test_breakable_prefill_is_rejected_when_the_platform_declines_it(
     server_args_overrides: dict[str, Any],
 ) -> None:
     monkeypatch.setattr(current_platform, "is_cuda", lambda: False)
+    monkeypatch.setattr(current_platform, "is_musa", lambda: False)
 
     with pytest.raises(
         ValueError,
@@ -317,10 +318,28 @@ def test_breakable_prefill_is_rejected_when_the_platform_declines_it(
         )
 
 
+def test_breakable_prefill_is_accepted_on_musa(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(current_platform, "is_cuda", lambda: False)
+    monkeypatch.setattr(current_platform, "is_musa", lambda: True)
+
+    overrides = build_generation_batch_overrides(
+        max_running_requests=4,
+        server_args_overrides={
+            "cuda_graph_backend_prefill": "breakable",
+            "cuda_graph_max_bs_prefill": 512,
+        },
+    )
+
+    assert overrides["cuda_graph_backend_prefill"] == "breakable"
+
+
 def test_full_prefill_is_not_gated_by_breakable_support(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(current_platform, "is_cuda", lambda: False)
+    monkeypatch.setattr(current_platform, "is_musa", lambda: False)
 
     overrides = build_generation_batch_overrides(
         max_running_requests=4,
