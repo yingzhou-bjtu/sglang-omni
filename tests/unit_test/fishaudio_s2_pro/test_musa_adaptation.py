@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -28,14 +29,27 @@ def test_fast_ar_attention_backend_uses_the_native_path_on_musa(
     assert backend == "torch_native"
 
 
-def test_musa_kvcache_attention_matches_a_reference_reduction() -> None:
-    torch.manual_seed(0)
-    batch, heads, kv_heads, head_dim, cache_position = 2, 4, 2, 8, 3
-    q = torch.randn(batch, 1, heads, head_dim, dtype=torch.float64)
-    k = torch.randn(batch, 1, kv_heads, head_dim, dtype=torch.float64)
-    v = torch.randn(batch, 1, kv_heads, head_dim, dtype=torch.float64)
-    k_cache = torch.zeros(batch, 11, kv_heads, head_dim, dtype=torch.float64)
-    v_cache = torch.zeros(batch, 11, kv_heads, head_dim, dtype=torch.float64)
+def test_musa_kvcache_attention_reuses_flash_attn_with_kvcache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = []
+
+    def flash_attn_with_kvcache(**kwargs: object) -> torch.Tensor:
+        calls.append(kwargs)
+        return kwargs["q"]
+
+    monkeypatch.setitem(
+        sys.modules,
+        "flash_attn_interface",
+        SimpleNamespace(flash_attn_with_kvcache=flash_attn_with_kvcache),
+    )
+
+    q = torch.randn(2, 1, 4, 8)
+    k = torch.randn(2, 1, 2, 8)
+    v = torch.randn(2, 1, 2, 8)
+    k_cache = torch.zeros(2, 11, 2, 8)
+    v_cache = torch.zeros(2, 11, 2, 8)
+    cache_seqlens = torch.tensor([4, 4], dtype=torch.int32)
 
     out = fish_audio_decoder.musa_kvcache_attention(
         q=q,
@@ -43,33 +57,20 @@ def test_musa_kvcache_attention_matches_a_reference_reduction() -> None:
         v_cache=v_cache,
         k=k,
         v=v,
-        cache_position=cache_position,
+        cache_seqlens=cache_seqlens,
+        causal=True,
+        num_splits=1,
     )
 
-    assert torch.equal(k_cache[:, cache_position : cache_position + 1], k)
-    assert torch.equal(v_cache[:, cache_position : cache_position + 1], v)
-    assert out.shape == q.shape
-
-    query = q.transpose(1, 2)
-    key = k_cache[:, : cache_position + 1].transpose(1, 2)
-    value = v_cache[:, : cache_position + 1].transpose(1, 2)
-    expected = torch.nn.functional.scaled_dot_product_attention(
-        query, key, value, enable_gqa=True
-    ).transpose(1, 2)
-
-    assert torch.allclose(out, expected, atol=1e-12)
-
-
-def test_musa_kvcache_attention_requires_key_and_value() -> None:
-    q = torch.randn(1, 1, 2, 4)
-    cache = torch.zeros(1, 4, 2, 4)
-
-    with pytest.raises(ValueError, match="requires k and v"):
-        fish_audio_decoder.musa_kvcache_attention(
-            q=q,
-            k_cache=cache,
-            v_cache=cache,
-            k=None,
-            v=None,
-            cache_position=0,
-        )
+    assert out is q
+    assert len(calls) == 1
+    assert calls[0] == {
+        "q": q,
+        "k_cache": k_cache,
+        "v_cache": v_cache,
+        "k": k,
+        "v": v,
+        "cache_seqlens": cache_seqlens,
+        "causal": True,
+        "num_splits": 1,
+    }

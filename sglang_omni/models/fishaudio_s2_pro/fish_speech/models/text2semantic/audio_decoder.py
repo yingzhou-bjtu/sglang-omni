@@ -11,7 +11,6 @@ from typing import Callable
 import torch
 import torch.nn as nn
 from torch import Tensor
-from torch.nn import functional as F
 from transformers import PreTrainedModel
 
 from sglang_omni.models.fishaudio_s2_pro.fish_speech.models.text2semantic.configuration import (
@@ -193,44 +192,23 @@ def musa_kvcache_attention(
     v_cache: torch.Tensor,
     k: torch.Tensor | None,
     v: torch.Tensor | None,
-    cache_position: int,
+    cache_seqlens: torch.Tensor | None,
+    causal: bool,
+    num_splits: int,
 ) -> torch.Tensor:
-    """Run Fast-AR attention with the native SDPA kernel on MUSA.
+    """Run Fast-AR attention with the MATE FlashAttention-3 KV-cache kernel."""
+    from flash_attn_interface import flash_attn_with_kvcache
 
-    The CUDA Fast-AR path is pinned to FA3 or FlashInfer, and neither backend is
-    available on MUSA. A decode step feeds a single query token against the
-    cached prefix, so the same scaled-dot-product attention the Slow-AR path
-    already uses is enough here.
-    """
-    if k is None or v is None:
-        raise ValueError("MUSA Fast-AR attention requires k and v")
-    else:
-        pass
-    if q.shape[0] != k.shape[0] or q.shape[0] != v.shape[0]:
-        raise ValueError("Fast-AR q, k, and v batch sizes must match")
-    else:
-        pass
-    if cache_position < 0:
-        raise ValueError("MUSA Fast-AR attention requires cache_position")
-    else:
-        pass
-
-    cache_end = cache_position + int(k.shape[1])
-    k_cache[:, cache_position:cache_end].copy_(k)
-    v_cache[:, cache_position:cache_end].copy_(v)
-
-    query = q.transpose(1, 2)
-    key = k_cache[:, :cache_end].transpose(1, 2)
-    value = v_cache[:, :cache_end].transpose(1, 2)
-
-    # The query token follows the whole cached prefix, so every cached position
-    # stays visible and no causal mask is needed here.
-    return F.scaled_dot_product_attention(
-        query,
-        key,
-        value,
-        enable_gqa=query.shape[1] != key.shape[1],
-    ).transpose(1, 2)
+    return flash_attn_with_kvcache(
+        q=q,
+        k_cache=k_cache,
+        v_cache=v_cache,
+        k=k,
+        v=v,
+        cache_seqlens=cache_seqlens,
+        causal=causal,
+        num_splits=num_splits,
+    )
 
 
 @torch.library.custom_op(
@@ -264,7 +242,11 @@ def flash_attn_kvcache_op(
             v_cache=v_cache,
             k=k,
             v=v,
-            cache_position=cache_position,
+            cache_seqlens=(
+                cache_seqlens.contiguous() if cache_seqlens is not None else None
+            ),
+            causal=causal,
+            num_splits=num_splits,
         )
     elif device_type == "cuda":
         output = cuda_kvcache_attention(
