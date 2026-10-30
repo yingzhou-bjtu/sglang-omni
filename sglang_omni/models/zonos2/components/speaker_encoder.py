@@ -46,13 +46,19 @@ class Qwen3SpeakerEmbedding(nn.Module):
     F_MIN = 0.0
     F_MAX = 12_000.0
 
-    def __init__(self, device: str, compile_forward: bool = False) -> None:
+    def __init__(
+        self,
+        device: str,
+        compile_forward: bool = False,
+        speaker_embedding_model: str | None = None,
+    ) -> None:
         super().__init__()
         self.device = device
         self.compile_forward = compile_forward
         self.compiled = None
+        self.speaker_embedding_model = speaker_embedding_model or self.MODEL_NAME
         self.model = AutoModel.from_pretrained(
-            self.MODEL_NAME,
+            self.speaker_embedding_model,
             trust_remote_code=True,
         )
         self.model.to(device)
@@ -267,6 +273,7 @@ class SpeakerEncoder(TensorReferenceEncodeHook[Zonos2RefInput]):
         device: str,
         cache_max_items: int = 256,
         compile_forward: bool = False,
+        speaker_embedding_model: str | None = None,
     ):
         if int(cache_max_items) < 1:
             raise ValueError(f"cache_max_items must be >= 1, got {cache_max_items}")
@@ -275,6 +282,7 @@ class SpeakerEncoder(TensorReferenceEncodeHook[Zonos2RefInput]):
         self.device = device
         self.embedder: Qwen3SpeakerEmbedding | None = None
         self.embedder_lock = threading.Lock()
+        self.speaker_embedding_model = speaker_embedding_model
         # note (Yue Yin): opt-in compile kill-switch (default OFF for bit-for-bit
         # parity); driven by the speaker_encode stage's spk_compile factory arg.
         self.compile = compile_forward
@@ -294,7 +302,9 @@ class SpeakerEncoder(TensorReferenceEncodeHook[Zonos2RefInput]):
             with self.embedder_lock:
                 if self.embedder is None:
                     self.embedder = Qwen3SpeakerEmbedding(
-                        device=self.device, compile_forward=self.compile
+                        device=self.device,
+                        compile_forward=self.compile,
+                        speaker_embedding_model=self.speaker_embedding_model,
                     )
                 else:
                     pass
