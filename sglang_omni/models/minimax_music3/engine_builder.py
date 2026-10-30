@@ -3,8 +3,11 @@
 
 from __future__ import annotations
 
+import atexit
 import json
 import logging
+import shutil
+import tempfile
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, TypedDict
@@ -48,6 +51,18 @@ else:
 logger = logging.getLogger(__name__)
 
 _AUDIO_WEIGHT_PREFIXES = ("model.audio_decoder.", "model.audio_extra_embedding.")
+
+
+def create_checkpoint_shim(source: Path) -> Path:
+    source = source.resolve()
+    shim = Path(tempfile.mkdtemp(prefix="sglang-omni-minimax-music3-backbone-"))
+    atexit.register(shutil.rmtree, shim, ignore_errors=True)
+    for entry in source.iterdir():
+        if entry.name != "config.json":
+            (shim / entry.name).symlink_to(entry)
+        else:
+            pass
+    return shim
 
 
 class MiniMaxMusic3SchedulerArguments(TypedDict):
@@ -108,10 +123,23 @@ class MiniMaxMusic3EngineBuilder(TtsEngineBuilder["MiniMaxMusic3SGLangRequestDat
 
         paths = resolve_checkpoint(model_path)
         self.checkpoint_root = str(paths.root)
-        return str(paths.qwen_dir)
+        backbone_dir = Path(paths.qwen_dir)
+        config = json.loads((backbone_dir / "config.json").read_text())
+        if config.get("model_type") == "qwen3":
+            return str(backbone_dir)
+        else:
+            pass
+        shadow_dir = create_checkpoint_shim(backbone_dir)
+        config["model_type"] = "qwen3"
+        (shadow_dir / "config.json").write_text(json.dumps(config, indent=2))
+        logger.info(
+            f"MiniMax Music 3: loading the backbone through {shadow_dir} "
+            "without modifying the checkpoint"
+        )
+        return str(shadow_dir)
 
     def pre_infra_setup(self, checkpoint_dir: str) -> None:
-        self.normalize_backbone_config(Path(checkpoint_dir) / "config.json")
+        del checkpoint_dir
         self.filter_audio_weights()
 
     def generation_defaults(self, *, dtype: str) -> GenerationDefaults:
@@ -301,26 +329,6 @@ class MiniMaxMusic3EngineBuilder(TtsEngineBuilder["MiniMaxMusic3SGLangRequestDat
             "stream_output_builder": build_stream_output,
             "enable_async_decode": False,
         }
-
-    @staticmethod
-    def normalize_backbone_config(config_path: Path) -> None:
-        """Rewrite the backbone config so HuggingFace resolves a Qwen3 config."""
-        config = json.loads(config_path.read_text())
-        if config.get("model_type") == "qwen3":
-            return
-        else:
-            pass
-        backup_path = config_path.with_suffix(".json.bak")
-        if not backup_path.exists():
-            backup_path.write_text(config_path.read_text())
-        else:
-            pass
-        config["model_type"] = "qwen3"
-        config_path.unlink()
-        config_path.write_text(json.dumps(config, indent=2))
-        logger.info(
-            f"MiniMax Music 3: rewrote {config_path} model_type to qwen3 (backup at {backup_path})"
-        )
 
     @staticmethod
     def filter_audio_weights() -> None:
