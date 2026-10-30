@@ -576,13 +576,16 @@ def test_acoustic_scheduler_accepts_the_relay_tensor_shape() -> None:
     assert decoder.hidden_shape == (1, 32768)
 
 
-def test_backbone_config_rewrite_does_not_write_through_a_symlink(
+def test_backbone_config_patch_leaves_the_snapshot_and_blob_alone(
     tmp_path: Path,
 ) -> None:
     """A Hub snapshot symlinks config.json into the shared blob store.
 
     Writing through the link would rewrite a blob whose filename is its own
-    content hash, corrupting it for every other snapshot that shares it.
+    content hash, corrupting it for every other snapshot that shares it, and
+    rewriting the snapshot at all breaks read-only weights mounts. The builder
+    therefore loads the backbone through a shadow directory, leaving both the
+    blob and the snapshot byte-identical.
     """
     from sglang_omni.models.minimax_music3.engine_builder import (
         MiniMaxMusic3EngineBuilder,
@@ -590,13 +593,28 @@ def test_backbone_config_rewrite_does_not_write_through_a_symlink(
 
     blob = tmp_path / "blob"
     blob.write_text(json.dumps({"model_type": "mixtral", "hidden_size": 4096}))
-    snapshot = tmp_path / "snapshot"
-    snapshot.mkdir()
+    snapshot = tmp_path / "snapshot" / "qwen_7B" / "qwen_7B"
+    snapshot.mkdir(parents=True)
     config_path = snapshot / "config.json"
     config_path.symlink_to(blob)
-
-    MiniMaxMusic3EngineBuilder.normalize_backbone_config(config_path)
+    (snapshot / "model.safetensors").write_bytes(b"weights")
+    (tmp_path / "snapshot" / "flowmatching_vae.pth").write_bytes(b"dit")
+    builder = MiniMaxMusic3EngineBuilder()
+    shadow = Path(builder.resolve_checkpoint(str(tmp_path / "snapshot")))
 
     assert json.loads(blob.read_text())["model_type"] == "mixtral"
-    assert not config_path.is_symlink()
-    assert json.loads(config_path.read_text())["model_type"] == "qwen3"
+    assert config_path.is_symlink()
+    assert json.loads((shadow / "config.json").read_text())["model_type"] == "qwen3"
+    assert (shadow / "model.safetensors").is_symlink()
+    assert not (snapshot / "config.json.bak").exists()
+
+    second_backbone = tmp_path / "second" / "qwen_7B" / "qwen_7B"
+    second_backbone.mkdir(parents=True)
+    (second_backbone / "config.json").write_text(
+        json.dumps({"model_type": "qwen3", "hidden_size": 4096})
+    )
+    (second_backbone / "model.safetensors").write_bytes(b"weights")
+    (tmp_path / "second" / "flowmatching_vae.pth").write_bytes(b"dit")
+    second_checkpoint = Path(builder.resolve_checkpoint(str(tmp_path / "second")))
+
+    assert second_checkpoint == second_backbone
