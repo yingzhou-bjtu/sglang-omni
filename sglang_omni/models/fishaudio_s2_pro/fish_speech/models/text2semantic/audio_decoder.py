@@ -20,6 +20,7 @@ from sglang_omni.models.fishaudio_s2_pro.fish_speech.models.text2semantic.utils 
     apply_rotary_emb,
     precompute_freqs_cis,
 )
+from sglang_omni.platforms import current_platform
 
 FISH_BATCH_INVARIANT = os.getenv("FISH_BATCH_INVARIANT", "false").lower() in (
     "true",
@@ -30,6 +31,10 @@ FISH_BATCH_INVARIANT = os.getenv("FISH_BATCH_INVARIANT", "false").lower() in (
 
 @cache
 def fast_ar_uses_fa3(device_index: int) -> bool:
+    if current_platform.is_musa():
+        return True
+    else:
+        pass
     major, minor = torch.cuda.get_device_capability(device_index)
     sm_version = major * 10 + minor
     if sm_version == 90:
@@ -141,7 +146,7 @@ def npu_kvcache_attention(
     return out
 
 
-def cuda_kvcache_attention(
+def fast_ar_kvcache_attention(
     *,
     q: torch.Tensor,
     k_cache: torch.Tensor,
@@ -153,13 +158,9 @@ def cuda_kvcache_attention(
     num_splits: int,
     cache_position: int,
 ) -> torch.Tensor:
-    """Dispatch Fast-AR attention to the validated CUDA backend."""
+    """Dispatch Fast-AR attention to the platform's validated backend."""
     device_index = q.device.index
-    if device_index is None:
-        raise RuntimeError("FishAudio S2-Pro Fast-AR requires an indexed CUDA device")
-    else:
-        pass
-    if fast_ar_uses_fa3(device_index):
+    if device_index is not None and fast_ar_uses_fa3(device_index):
         from sgl_kernel.flash_attn import flash_attn_with_kvcache
 
         return flash_attn_with_kvcache(
@@ -174,6 +175,12 @@ def cuda_kvcache_attention(
         )
     else:
         pass
+    if device_index is None:
+        raise RuntimeError(
+            "FishAudio S2-Pro Fast-AR requires an indexed accelerator device"
+        )
+    else:
+        pass
     return flashinfer_kvcache_attention(
         q=q,
         k_cache=k_cache,
@@ -182,32 +189,6 @@ def cuda_kvcache_attention(
         v=v,
         causal=causal,
         cache_position=cache_position,
-    )
-
-
-def musa_kvcache_attention(
-    *,
-    q: torch.Tensor,
-    k_cache: torch.Tensor,
-    v_cache: torch.Tensor,
-    k: torch.Tensor | None,
-    v: torch.Tensor | None,
-    cache_seqlens: torch.Tensor | None,
-    causal: bool,
-    num_splits: int,
-) -> torch.Tensor:
-    """Run Fast-AR attention with the MATE FlashAttention-3 KV-cache kernel."""
-    from flash_attn_interface import flash_attn_with_kvcache
-
-    return flash_attn_with_kvcache(
-        q=q,
-        k_cache=k_cache,
-        v_cache=v_cache,
-        k=k,
-        v=v,
-        cache_seqlens=cache_seqlens,
-        causal=causal,
-        num_splits=num_splits,
     )
 
 
@@ -235,21 +216,8 @@ def flash_attn_kvcache_op(
             v=v,
             cache_position=cache_position,
         )
-    elif device_type == "musa":
-        output = musa_kvcache_attention(
-            q=q,
-            k_cache=k_cache,
-            v_cache=v_cache,
-            k=k,
-            v=v,
-            cache_seqlens=(
-                cache_seqlens.contiguous() if cache_seqlens is not None else None
-            ),
-            causal=causal,
-            num_splits=num_splits,
-        )
-    elif device_type == "cuda":
-        output = cuda_kvcache_attention(
+    elif device_type in ("cuda", "musa"):
+        output = fast_ar_kvcache_attention(
             q=q,
             k_cache=k_cache,
             v_cache=v_cache,
@@ -330,9 +298,7 @@ class Attention(nn.Module):
         self.attention_qk_norm = config.attention_qk_norm
         self.kv_cache: KVCache | None = None
 
-        self._register_load_state_dict_pre_hook(
-            self.load_hook
-        )  # noqa: leading-underscore
+        self._register_load_state_dict_pre_hook(self.load_hook)  # noqa: leading-underscore
 
     def load_hook(self, state_dict, prefix, *args):
         """Normalize legacy split-QKV checkpoints before strict loading."""
