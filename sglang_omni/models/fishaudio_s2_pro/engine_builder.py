@@ -49,10 +49,8 @@ def resolve_fast_ar_attention_backend(*, gpu_id: int) -> str:
     else:
         pass
     if current_platform.is_musa():
-        # MUSA devices expose no CUDA compute capability, so Fast-AR cannot be
-        # pinned to an SM-validated backend. Use the native attention path that
-        # the other MUSA TTS/ASR engines in this tree are validated against.
-        return "torch_native"
+        # SGLang registers its MUSA FlashAttention backend under "fa3".
+        return "fa3"
     else:
         pass
 

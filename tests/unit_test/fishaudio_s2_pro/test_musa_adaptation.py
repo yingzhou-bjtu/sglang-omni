@@ -15,7 +15,7 @@ from sglang_omni.models.fishaudio_s2_pro.fish_speech.models.text2semantic import
 )
 
 
-def test_fast_ar_attention_backend_uses_the_native_path_on_musa(
+def test_fast_ar_attention_backend_uses_fa3_on_musa(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -26,7 +26,7 @@ def test_fast_ar_attention_backend_uses_the_native_path_on_musa(
 
     backend = engine_builder.resolve_fast_ar_attention_backend(gpu_id=0)
 
-    assert backend == "torch_native"
+    assert backend == "fa3"
 
 
 def test_musa_kvcache_attention_reuses_flash_attn_with_kvcache(
