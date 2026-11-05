@@ -109,6 +109,13 @@ class MossTtsEngineBuilder(TtsEngineBuilder[MossTTSSGLangRequestData]):
     ) -> None:
         del server_args
         graph_runner = self.model_runner.decode_cuda_graph_runner
+        if graph_runner is None:
+            raise RuntimeError(
+                "MOSS-TTS sampling graphs require SGLang decode graph runner; "
+                "unsupported graph setup cannot fall back to configured buckets"
+            )
+        else:
+            pass
         model.init_sampling_graphs(
             list(graph_runner.capture_bs),
             disable_padding=graph_runner.disable_padding,

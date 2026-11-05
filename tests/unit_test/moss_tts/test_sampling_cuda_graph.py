@@ -169,6 +169,23 @@ def test_engine_builder_uses_backbone_capture_buckets(
     )
 
 
+def test_engine_builder_rejects_missing_decode_graph_runner() -> None:
+    builder = MossTtsEngineBuilder()
+    builder.setup_model(
+        model_worker=SimpleNamespace(
+            model_runner=SimpleNamespace(decode_cuda_graph_runner=None)
+        ),
+        checkpoint_dir="checkpoint",
+        device="musa:0",
+        gpu_id=0,
+        server_args=SimpleNamespace(),
+    )
+    model = SimpleNamespace(init_sampling_graphs=lambda *args, **kwargs: None)
+
+    with pytest.raises(RuntimeError, match="require SGLang decode graph runner"):
+        builder.post_cuda_graph_setup(model, SimpleNamespace())
+
+
 def test_model_runner_routes_supported_audio_batch_to_sampling_graph() -> None:
     calls = []
 
