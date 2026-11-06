@@ -48,6 +48,11 @@ def resolve_fast_ar_attention_backend(*, gpu_id: int) -> str:
         return "ascend"
     else:
         pass
+    if current_platform.is_musa():
+        # SGLang registers its MUSA FlashAttention backend under "fa3".
+        return "fa3"
+    else:
+        pass
 
     sm_version = get_visible_gpu_sm_version(gpu_id)
     if sm_version is None:
