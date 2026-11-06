@@ -266,6 +266,7 @@ def create_tts_engine_executor(
     n_gpu_layers: int = -1,
 ) -> SimpleScheduler[StagePayload, StagePayload]:
     try:
+        import llama_cpp
         from llama_cpp import LLAMA_SPLIT_MODE_NONE, Llama
     except ImportError as exc:
         raise RuntimeError(
@@ -275,9 +276,9 @@ def create_tts_engine_executor(
     from sglang_omni.utils.device import resolve_concrete_device
 
     concrete_device = resolve_concrete_device(device, gpu_id)
-    if concrete_device.type not in ("cpu", "cuda", "xpu"):
+    if concrete_device.type not in ("cpu", "cuda", "xpu", "musa"):
         raise ValueError(
-            "Audar-TTS llama.cpp engine runs on cuda, xpu or cpu only; resolved "
+            "Audar-TTS llama.cpp engine runs on cuda, xpu, musa or cpu only; resolved "
             f"device={concrete_device}"
         )
     elif concrete_device.type == "xpu":
@@ -292,10 +293,28 @@ def create_tts_engine_executor(
             pass
     else:
         pass
-    main_gpu = 0 if concrete_device.type == "cpu" else concrete_device.index
-    if concrete_device.type == "cpu":
+    use_cpu_backend = concrete_device.type == "cpu"
+    if concrete_device.type == "musa":
+        get_system_info = getattr(llama_cpp, "llama_print_system_info", None)
+        system_info = b""
+        if get_system_info is not None:
+            try:
+                system_info = get_system_info() or b""
+            except (OSError, RuntimeError):
+                pass
+        else:
+            pass
+        if isinstance(system_info, bytes):
+            system_info = system_info.decode("utf-8", errors="replace")
+        else:
+            pass
+        use_cpu_backend = "musa" not in system_info.casefold()
+    else:
+        pass
+    main_gpu = 0 if use_cpu_backend else concrete_device.index
+    if use_cpu_backend:
         # note (lennox): the n_gpu_layers default of -1 offloads every layer, so
-        # a cpu resolution would still run on GPU 0 without this.
+        # a CPU-backed resolution would still run on GPU 0 without this.
         n_gpu_layers = 0
     else:
         pass
