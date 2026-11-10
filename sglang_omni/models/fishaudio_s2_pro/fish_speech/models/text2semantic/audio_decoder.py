@@ -5,11 +5,11 @@ from __future__ import annotations
 
 import math
 import os
-from functools import cache
 from typing import Callable
 
 import torch
 import torch.nn as nn
+from sglang.srt.server_args import get_global_server_args
 from torch import Tensor
 from transformers import PreTrainedModel
 
@@ -22,33 +22,18 @@ from sglang_omni.models.fishaudio_s2_pro.fish_speech.models.text2semantic.utils 
 )
 from sglang_omni.platforms import current_platform
 
+if current_platform.is_musa():
+    from sglang.srt.hardware_backend.musa.attention.flashattention_backend import (
+        flash_attn_with_kvcache,
+    )
+else:
+    from sgl_kernel.flash_attn import flash_attn_with_kvcache
+
 FISH_BATCH_INVARIANT = os.getenv("FISH_BATCH_INVARIANT", "false").lower() in (
     "true",
     "1",
     "yes",
 )
-
-
-@cache
-def fast_ar_uses_fa3(device_index: int) -> bool:
-    if current_platform.is_musa():
-        return True
-    else:
-        pass
-    major, minor = torch.cuda.get_device_capability(device_index)
-    sm_version = major * 10 + minor
-    if sm_version == 90:
-        return True
-    else:
-        pass
-    if sm_version in (89, 100, 120):
-        return False
-    else:
-        pass
-    raise RuntimeError(
-        f"FishAudio S2-Pro Fast-AR does not support SM{sm_version}; "
-        "supported architectures: SM89, SM90, SM100, SM120."
-    )
 
 
 def flashinfer_kvcache_attention(
@@ -160,9 +145,7 @@ def fast_ar_kvcache_attention(
 ) -> torch.Tensor:
     """Dispatch Fast-AR attention to the platform's validated backend."""
     device_index = q.device.index
-    if device_index is not None and fast_ar_uses_fa3(device_index):
-        from sgl_kernel.flash_attn import flash_attn_with_kvcache
-
+    if device_index is not None and get_global_server_args().attention_backend == "fa3":
         return flash_attn_with_kvcache(
             q=q,
             k_cache=k_cache,
@@ -298,7 +281,9 @@ class Attention(nn.Module):
         self.attention_qk_norm = config.attention_qk_norm
         self.kv_cache: KVCache | None = None
 
-        self._register_load_state_dict_pre_hook(self.load_hook)  # noqa: leading-underscore
+        self._register_load_state_dict_pre_hook(
+            self.load_hook
+        )  # noqa: leading-underscore
 
     def load_hook(self, state_dict, prefix, *args):
         """Normalize legacy split-QKV checkpoints before strict loading."""

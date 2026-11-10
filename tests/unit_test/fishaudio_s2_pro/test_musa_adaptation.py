@@ -3,14 +3,11 @@
 
 from __future__ import annotations
 
-import sys
-import types
 from types import SimpleNamespace
 
 import pytest
 import torch
 
-from sglang_omni.models.fishaudio_s2_pro import engine_builder
 from sglang_omni.models.fishaudio_s2_pro.fish_speech.models.text2semantic import (
     audio_decoder as fish_audio_decoder,
 )
@@ -19,6 +16,8 @@ from sglang_omni.models.fishaudio_s2_pro.fish_speech.models.text2semantic import
 def test_fast_ar_attention_backend_uses_fa3_on_musa(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from sglang_omni.models.fishaudio_s2_pro import engine_builder
+
     monkeypatch.setattr(
         engine_builder,
         "current_platform",
@@ -30,21 +29,6 @@ def test_fast_ar_attention_backend_uses_fa3_on_musa(
     assert backend == "fa3"
 
 
-def test_musa_fast_ar_uses_fa3(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        fish_audio_decoder,
-        "current_platform",
-        SimpleNamespace(is_musa=lambda: True),
-    )
-    fish_audio_decoder.fast_ar_uses_fa3.cache_clear()
-    try:
-        assert fish_audio_decoder.fast_ar_uses_fa3(0)
-    finally:
-        fish_audio_decoder.fast_ar_uses_fa3.cache_clear()
-
-
 def test_musa_fast_ar_kvcache_reuses_sglang_flash_attn(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -54,13 +38,14 @@ def test_musa_fast_ar_kvcache_reuses_sglang_flash_attn(
         calls.append(kwargs)
         return kwargs["q"]
 
-    fake_flash_attn = SimpleNamespace(flash_attn_with_kvcache=flash_attn_with_kvcache)
-    fake_sgl_kernel = types.ModuleType("sgl_kernel")
-    fake_sgl_kernel.__path__ = []
-    fake_sgl_kernel.flash_attn = fake_flash_attn
-    monkeypatch.setitem(sys.modules, "sgl_kernel", fake_sgl_kernel)
-    monkeypatch.setitem(sys.modules, "sgl_kernel.flash_attn", fake_flash_attn)
-    monkeypatch.setattr(fish_audio_decoder, "fast_ar_uses_fa3", lambda _: True)
+    monkeypatch.setattr(
+        fish_audio_decoder, "flash_attn_with_kvcache", flash_attn_with_kvcache
+    )
+    monkeypatch.setattr(
+        fish_audio_decoder,
+        "get_global_server_args",
+        lambda: SimpleNamespace(attention_backend="fa3"),
+    )
 
     q = SimpleNamespace(device=SimpleNamespace(index=0))
     k = torch.randn(2, 1, 2, 8)
