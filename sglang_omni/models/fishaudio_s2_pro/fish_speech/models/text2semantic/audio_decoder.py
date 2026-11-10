@@ -11,6 +11,7 @@ import torch
 import torch.nn as nn
 from sglang.srt.runtime_context import get_exec
 from torch import Tensor
+from torch.nn import functional as F
 from transformers import PreTrainedModel
 
 from sglang_omni.models.fishaudio_s2_pro.fish_speech.models.text2semantic.configuration import (
