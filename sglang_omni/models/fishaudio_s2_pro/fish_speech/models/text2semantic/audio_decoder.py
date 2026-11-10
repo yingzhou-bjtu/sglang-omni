@@ -9,7 +9,7 @@ from typing import Callable
 
 import torch
 import torch.nn as nn
-from sglang.srt.server_args import get_global_server_args
+from sglang.srt.runtime_context import get_exec
 from torch import Tensor
 from transformers import PreTrainedModel
 
@@ -145,7 +145,7 @@ def fast_ar_kvcache_attention(
 ) -> torch.Tensor:
     """Dispatch Fast-AR attention to the platform's validated backend."""
     device_index = q.device.index
-    if device_index is not None and get_global_server_args().attention_backend == "fa3":
+    if device_index is not None and get_exec().kernel.attention_backend == "fa3":
         return flash_attn_with_kvcache(
             q=q,
             k_cache=k_cache,

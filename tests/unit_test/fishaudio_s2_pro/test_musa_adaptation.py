@@ -43,8 +43,10 @@ def test_musa_fast_ar_kvcache_reuses_sglang_flash_attn(
     )
     monkeypatch.setattr(
         fish_audio_decoder,
-        "get_global_server_args",
-        lambda: SimpleNamespace(attention_backend="fa3"),
+        "get_exec",
+        lambda: SimpleNamespace(
+            kernel=SimpleNamespace(attention_backend="fa3"),
+        ),
     )
 
     q = SimpleNamespace(device=SimpleNamespace(index=0))
