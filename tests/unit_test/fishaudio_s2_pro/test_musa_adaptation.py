@@ -3,14 +3,12 @@
 
 from __future__ import annotations
 
-import sys
-import types
 from types import SimpleNamespace
 
 import pytest
 import torch
 
-from sglang_omni.models.fishaudio_s2_pro import engine_builder
+from sglang_omni.models.fishaudio_s2_pro import fast_ar_attention
 from sglang_omni.models.fishaudio_s2_pro.fish_speech.models.text2semantic import (
     audio_decoder as fish_audio_decoder,
 )
@@ -20,32 +18,20 @@ def test_fast_ar_attention_backend_uses_fa3_on_musa(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        engine_builder,
+        fast_ar_attention,
         "current_platform",
         SimpleNamespace(is_npu=lambda: False, is_musa=lambda: True),
     )
-
-    backend = engine_builder.resolve_fast_ar_attention_backend(gpu_id=0)
+    fast_ar_attention.resolve_fast_ar_attention_backend.cache_clear()
+    try:
+        backend = fast_ar_attention.resolve_fast_ar_attention_backend(gpu_id=0)
+    finally:
+        fast_ar_attention.resolve_fast_ar_attention_backend.cache_clear()
 
     assert backend == "fa3"
 
 
-def test_musa_fast_ar_uses_fa3(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        fish_audio_decoder,
-        "current_platform",
-        SimpleNamespace(is_musa=lambda: True),
-    )
-    fish_audio_decoder.fast_ar_uses_fa3.cache_clear()
-    try:
-        assert fish_audio_decoder.fast_ar_uses_fa3(0)
-    finally:
-        fish_audio_decoder.fast_ar_uses_fa3.cache_clear()
-
-
-def test_musa_fast_ar_kvcache_reuses_sglang_flash_attn(
+def test_musa_fast_ar_kvcache_reuses_mate_flash_attn(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = []
@@ -54,13 +40,21 @@ def test_musa_fast_ar_kvcache_reuses_sglang_flash_attn(
         calls.append(kwargs)
         return kwargs["q"]
 
-    fake_flash_attn = SimpleNamespace(flash_attn_with_kvcache=flash_attn_with_kvcache)
-    fake_sgl_kernel = types.ModuleType("sgl_kernel")
-    fake_sgl_kernel.__path__ = []
-    fake_sgl_kernel.flash_attn = fake_flash_attn
-    monkeypatch.setitem(sys.modules, "sgl_kernel", fake_sgl_kernel)
-    monkeypatch.setitem(sys.modules, "sgl_kernel.flash_attn", fake_flash_attn)
-    monkeypatch.setattr(fish_audio_decoder, "fast_ar_uses_fa3", lambda _: True)
+    monkeypatch.setattr(
+        fast_ar_attention,
+        "current_platform",
+        SimpleNamespace(is_musa=lambda: True),
+    )
+    monkeypatch.setattr(
+        fast_ar_attention,
+        "_mate_flash_attn_with_kvcache",
+        flash_attn_with_kvcache,
+    )
+    monkeypatch.setattr(
+        fish_audio_decoder,
+        "resolve_fast_ar_attention_backend",
+        lambda *, gpu_id: "fa3",
+    )
 
     q = SimpleNamespace(device=SimpleNamespace(index=0))
     k = torch.randn(2, 1, 2, 8)
@@ -93,3 +87,23 @@ def test_musa_fast_ar_kvcache_reuses_sglang_flash_attn(
         "causal": True,
         "num_splits": 1,
     }
+
+
+def test_cuda_fast_ar_kvcache_reuses_sgl_kernel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def sgl_flash_attn_with_kvcache(**kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(
+        fast_ar_attention,
+        "current_platform",
+        SimpleNamespace(is_musa=lambda: False),
+    )
+    monkeypatch.setattr(
+        fast_ar_attention,
+        "_sgl_flash_attn_with_kvcache",
+        sgl_flash_attn_with_kvcache,
+    )
+
+    assert fast_ar_attention.get_fa3_kvcache_attention() is sgl_flash_attn_with_kvcache
