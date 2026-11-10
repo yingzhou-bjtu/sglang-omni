@@ -41,6 +41,7 @@ ARG PYPI_INDEX_URL=https://pypi.org/simple
 ARG FFMPEG_MUSA_REPO=https://github.com/MooreThreads/FFmpeg.git
 ARG FFMPEG_MUSA_REF=mt-7.0.2-public
 ARG TORCHCODEC_INSTALL_SPEC="torchcodec @ git+https://github.com/MooreThreads/torchcodec.git@release/0.5-musa-public"
+ARG LLAMA_CPP_PYTHON_VERSION=0.3.34
 
 RUN python3 -m pip install --upgrade pip "setuptools<82" wheel \
     && cp pyproject_musa.toml pyproject.toml \
@@ -76,7 +77,22 @@ RUN python3 -m pip install --upgrade pip "setuptools<82" wheel \
 # and accelerate 1.12.0, which would replace the inherited stack.
 RUN python3 -m pip install --no-cache-dir --no-deps qwen-tts==0.1.1
 
+# Package extras cannot pass the CMake options required to build the MUSA backend.
+RUN mkdir -p /tmp/llama-cpp-wheels \
+    && CMAKE_ARGS="-DGGML_MUSA=ON -DGGML_CUDA=OFF" \
+        FORCE_CMAKE=1 \
+        python3 -m pip wheel --no-cache-dir --no-deps \
+            --no-binary llama-cpp-python \
+            "llama-cpp-python==${LLAMA_CPP_PYTHON_VERSION}" \
+            -w /tmp/llama-cpp-wheels \
+            --index-url "${PYPI_INDEX_URL}" \
+    && python3 -m pip install --no-cache-dir --no-deps \
+        "/tmp/llama-cpp-wheels/llama_cpp_python-${LLAMA_CPP_PYTHON_VERSION}-"*.whl \
+    && rm -rf /tmp/llama-cpp-wheels
+
 RUN python3 - <<'PY'
+from importlib.metadata import files
+
 import torch
 
 assert getattr(torch.version, "musa", None), "the inherited PyTorch build is not MUSA-enabled"
@@ -86,6 +102,18 @@ import triton
 import triton.backends.mtgpu  # noqa: F401
 import sglang  # noqa: F401
 import sglang_omni  # noqa: F401
+
+# The MUSA driver is normally absent while building the image, so inspect the
+# installed wheel payload instead of importing llama_cpp.
+llama_cpp_files = files("llama-cpp-python")
+assert llama_cpp_files is not None
+musa_libraries = [
+    item.locate()
+    for item in llama_cpp_files
+    if item.name == "libggml-musa.so"
+]
+assert musa_libraries, "llama-cpp-python is missing the MUSA backend library"
+assert all(path.is_file() and path.stat().st_size > 0 for path in musa_libraries)
 PY
 
 CMD ["/bin/bash"]
