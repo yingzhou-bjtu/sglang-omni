@@ -23,9 +23,7 @@ from sglang_omni.models.fishaudio_s2_pro.fish_speech.models.text2semantic.utils 
 from sglang_omni.platforms import current_platform
 
 if current_platform.is_musa():
-    from sglang.srt.hardware_backend.musa.attention.flashattention_backend import (
-        flash_attn_with_kvcache,
-    )
+    from flash_attn_interface import flash_attn_with_kvcache
 else:
     from sgl_kernel.flash_attn import flash_attn_with_kvcache
 
