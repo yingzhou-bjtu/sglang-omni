@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import ctypes
+import logging
 import threading
 import time
 from dataclasses import dataclass
@@ -20,6 +21,7 @@ from sglang_omni.models.audar_tts.protocol import (
     parse_speech_codes,
 )
 from sglang_omni.models.audar_tts.request_builders import build_audar_state
+from sglang_omni.platforms import current_platform
 from sglang_omni.preprocessing.audio import AudioMediaIO
 from sglang_omni.preprocessing.cache_key import hash_bytes, reference_path_cache_key
 from sglang_omni.proto import StagePayload
@@ -46,6 +48,7 @@ OUTPUT_SAMPLE_RATE = 24000
 MIN_REFERENCE_SECONDS = 5.0
 MAX_REFERENCE_SECONDS = 15.0
 XPU_WARMUP_PROMPT_TOKENS = 256  # measured on Arc Pro B60
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -266,6 +269,7 @@ def create_tts_engine_executor(
     n_gpu_layers: int = -1,
 ) -> SimpleScheduler[StagePayload, StagePayload]:
     try:
+        import llama_cpp
         from llama_cpp import LLAMA_SPLIT_MODE_NONE, Llama
     except ImportError as exc:
         raise RuntimeError(
@@ -275,9 +279,9 @@ def create_tts_engine_executor(
     from sglang_omni.utils.device import resolve_concrete_device
 
     concrete_device = resolve_concrete_device(device, gpu_id)
-    if concrete_device.type not in ("cpu", "cuda", "xpu"):
+    if concrete_device.type not in ("cpu", "cuda", "xpu", "musa"):
         raise ValueError(
-            "Audar-TTS llama.cpp engine runs on cuda, xpu or cpu only; resolved "
+            "Audar-TTS llama.cpp engine runs on cuda, xpu, musa or cpu only; resolved "
             f"device={concrete_device}"
         )
     elif concrete_device.type == "xpu":
@@ -292,10 +296,25 @@ def create_tts_engine_executor(
             pass
     else:
         pass
-    main_gpu = 0 if concrete_device.type == "cpu" else concrete_device.index
-    if concrete_device.type == "cpu":
+    use_cpu_backend = concrete_device.type == "cpu"
+    if current_platform.is_musa() and not use_cpu_backend:
+        llama_system_info = llama_cpp.llama_print_system_info().decode(
+            "utf-8", errors="replace"
+        )
+        use_cpu_backend = "musa" not in llama_system_info.casefold()
+        if use_cpu_backend:
+            logger.warning(
+                "llama.cpp MUSA backend not detected; falling back to CPU. "
+                f"system_info={llama_system_info!r}"
+            )
+        else:
+            pass
+    else:
+        pass
+    main_gpu = 0 if use_cpu_backend else concrete_device.index
+    if use_cpu_backend:
         # note (lennox): the n_gpu_layers default of -1 offloads every layer, so
-        # a cpu resolution would still run on GPU 0 without this.
+        # a CPU-backed resolution would still run on GPU 0 without this.
         n_gpu_layers = 0
     else:
         pass
