@@ -10,6 +10,7 @@ import pytest
 import torch
 
 import sglang_omni.scheduling.omni_scheduler as omni_scheduler_module
+from sglang_omni.model_runner.base import rank_shared_unseeded_sampling_seed
 from sglang_omni.models.fishaudio_s2_pro.model_runner import (
     FishS2ProModelRunner,
     collect_s2pro_step_outputs,
@@ -19,6 +20,7 @@ from sglang_omni.models.fishaudio_s2_pro.request_builders import (
     make_tts_scheduler_adapters,
 )
 from sglang_omni.models.fishaudio_s2_pro.sglang_model import S2ProSGLangTextModel
+from sglang_omni.sampling.seed import resolve_row_seed
 from sglang_omni.scheduling.omni_scheduler import OmniScheduler
 from sglang_omni.scheduling.types import SchedulerRequest
 from tests.unit_test.fixtures.fish_fakes import (
@@ -180,7 +182,7 @@ def test_fish_s2pro_before_decode_uses_gpu_history_buffer() -> None:
         sampling_top_p=torch.zeros(1),
         sampling_top_k=torch.zeros(1, dtype=torch.long),
         sampling_rep_penalty=torch.zeros(1),
-        sampling_seeds=torch.full((1,), -1, dtype=torch.long),
+        sampling_seeds=torch.zeros(1, dtype=torch.long),
         step_count=torch.zeros(1, dtype=torch.long),
         ras_temperature=torch.zeros(1),
         ras_top_p=torch.zeros(1),
@@ -234,6 +236,7 @@ def test_fish_s2pro_before_prefill_syncs_decode_state() -> None:
         dtype=torch.long,
     )
     second.semantic_history_count = 2
+    first.seed = 17
 
     runner = object.__new__(FishS2ProModelRunner)
 
@@ -250,7 +253,7 @@ def test_fish_s2pro_before_prefill_syncs_decode_state() -> None:
         sampling_top_p=torch.zeros(2),
         sampling_top_k=torch.zeros(2, dtype=torch.long),
         sampling_rep_penalty=torch.zeros(2),
-        sampling_seeds=torch.full((2,), -1, dtype=torch.long),
+        sampling_seeds=torch.zeros(2, dtype=torch.long),
         step_count=torch.zeros(2, dtype=torch.long),
         ras_temperature=torch.zeros(2),
         ras_top_p=torch.zeros(2),
@@ -259,14 +262,11 @@ def test_fish_s2pro_before_prefill_syncs_decode_state() -> None:
     )
     forward_batch = SimpleNamespace(input_ids=torch.tensor([10, 11]))
 
-    runner.before_prefill(
-        forward_batch,
-        None,
-        [
-            SchedulerRequest(request_id="req-first", data=first),
-            SchedulerRequest(request_id="req-second", data=second),
-        ],
-    )
+    requests = [
+        SchedulerRequest(request_id="req-first", data=first),
+        SchedulerRequest(request_id="req-second", data=second),
+    ]
+    runner.before_prefill(forward_batch, None, requests)
 
     assert hasattr(forward_batch, "input_embeds")
     assert torch.equal(runner.model.prev_tokens[0], torch.zeros(4, dtype=torch.long))
@@ -288,6 +288,10 @@ def test_fish_s2pro_before_prefill_syncs_decode_state() -> None:
     )
     assert torch.allclose(runner.model.ras_temperature, torch.tensor([0.35, 0.25]))
     assert torch.allclose(runner.model.ras_top_p, torch.tensor([0.45, 0.95]))
+    assert runner.model.sampling_seeds.tolist() == [
+        resolve_row_seed(17),
+        resolve_row_seed(rank_shared_unseeded_sampling_seed(requests[1], 1)),
+    ]
 
 
 def test_fish_s2pro_setup_vq_decode_allocates_sampling_state() -> None:
@@ -319,6 +323,7 @@ def test_fish_s2pro_setup_vq_decode_allocates_sampling_state() -> None:
     assert model.sampling_top_p.shape == (3,)
     assert model.sampling_top_k.tolist() == [30, 30, 30]
     assert model.sampling_rep_penalty.shape == (3,)
+    assert torch.equal(model.sampling_seeds, torch.zeros(3, dtype=torch.long))
     assert model.ras_temperature.shape == (3,)
     assert model.ras_top_p.shape == (3,)
     assert model.rep_positions.tolist() == [0, 1, 2, 3, 4]
@@ -330,12 +335,16 @@ def test_fish_s2pro_decode_codebooks_keeps_eos_out_of_audio_embedding(
     monkeypatch,
 ) -> None:
     # multinomial_with_seed is a GPU-only Triton kernel; this CPU test only
-    # exercises EOS handling, and all rows are unseeded, so stub it out.
+    # exercises EOS handling, so stub it out.
     def fake_multinomial_with_seed(logprobs, seeds, pos):
         del seeds, pos
         assert torch.all(logprobs <= 0)
         assert torch.isneginf(logprobs).any()
         return logprobs.argmax(-1, keepdim=True)
+
+    def unexpected_multinomial(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("graph decode must not execute torch.multinomial")
 
     decode_codebooks = S2ProSGLangTextModel.decode_codebooks.__wrapped__
     monkeypatch.setitem(
@@ -343,6 +352,7 @@ def test_fish_s2pro_decode_codebooks_keeps_eos_out_of_audio_embedding(
         "multinomial_with_seed",
         fake_multinomial_with_seed,
     )
+    monkeypatch.setattr(torch, "multinomial", unexpected_multinomial)
 
     class AudioDecoder:
         def __init__(self) -> None:
@@ -379,7 +389,7 @@ def test_fish_s2pro_decode_codebooks_keeps_eos_out_of_audio_embedding(
         ras_top_p=torch.ones(1),
         sampling_top_p=torch.ones(1),
         sampling_rep_penalty=torch.ones(1),
-        sampling_seeds=torch.full((1,), -1, dtype=torch.long),
+        sampling_seeds=torch.zeros(1, dtype=torch.long),
         step_count=torch.zeros(1, dtype=torch.long),
         rep_positions=torch.arange(4),
         graph_top_k=30,
