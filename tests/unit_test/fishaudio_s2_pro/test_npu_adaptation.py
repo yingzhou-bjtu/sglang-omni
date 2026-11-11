@@ -114,7 +114,7 @@ def test_fast_ar_attention_rejects_unsupported_device_clearly() -> None:
     k_cache = torch.zeros(1, 11, 4, 8)
     v_cache = torch.zeros(1, 11, 4, 8)
 
-    with pytest.raises(RuntimeError, match="supports CUDA and NPU"):
+    with pytest.raises(RuntimeError, match="supports CUDA, NPU and MUSA"):
         fish_audio_decoder.flash_attn_kvcache_op(
             q=q,
             k_cache=k_cache,
@@ -153,9 +153,12 @@ def test_npu_kvcache_attention_requires_kv_and_cache_position() -> None:
 
 def test_fish_engine_builder_npu_defaults(monkeypatch) -> None:
     from sglang_omni.models.fishaudio_s2_pro import engine_builder as fish_engine
+    from sglang_omni.models.fishaudio_s2_pro import fast_ar_attention
 
     fake_npu = SimpleNamespace(is_npu=lambda: True, device_type="npu")
     monkeypatch.setattr(fish_engine, "current_platform", fake_npu)
+    monkeypatch.setattr(fast_ar_attention, "current_platform", fake_npu)
+    fast_ar_attention.resolve_fast_ar_attention_backend.cache_clear()
 
     builder = fish_engine.FishS2ProEngineBuilder(max_new_tokens=256, ras_window=16)
     builder.gpu_id = 0
@@ -174,4 +177,5 @@ def test_fish_engine_builder_npu_defaults(monkeypatch) -> None:
     assert overrides["cuda_graph_bs"] == [1, 2, 4, 8, 16]
     assert overrides["cuda_graph_max_bs"] == 16
 
-    assert fish_engine.resolve_fast_ar_attention_backend(gpu_id=0) == "ascend"
+    assert fast_ar_attention.resolve_fast_ar_attention_backend(gpu_id=0) == "ascend"
+    fast_ar_attention.resolve_fast_ar_attention_backend.cache_clear()

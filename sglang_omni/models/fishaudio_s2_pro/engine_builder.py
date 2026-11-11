@@ -14,6 +14,9 @@ from transformers import PreTrainedTokenizerFast
 from sglang_omni.model_runner.model_worker import ModelWorker
 from sglang_omni.models.fishaudio_s2_pro import request_builders
 from sglang_omni.models.fishaudio_s2_pro import stages as fish_stages
+from sglang_omni.models.fishaudio_s2_pro.fast_ar_attention import (
+    resolve_fast_ar_attention_backend,
+)
 from sglang_omni.models.fishaudio_s2_pro.tokenizer import S2ProTokenizerAdapter
 from sglang_omni.platforms import current_platform
 from sglang_omni.proto.request import StagePayload
@@ -25,7 +28,6 @@ from sglang_omni.scheduling.engine_factory import (
 from sglang_omni.scheduling.sglang_backend.output_processor import SGLangOutputProcessor
 from sglang_omni.utils.gpu_compat import get_visible_gpu_sm_version
 from sglang_omni.vendor.sglang.server_args import override_server_args
-from sglang_omni.vendor.sglang.utils import is_flashinfer_available
 
 if TYPE_CHECKING:
 
@@ -33,51 +35,6 @@ if TYPE_CHECKING:
     from sglang_omni.models.fishaudio_s2_pro.sglang_model import S2ProSGLangTextModel
 else:
     pass
-
-_VALIDATED_AUTO_ATTENTION_BACKENDS = {
-    89: "flashinfer",
-    90: "fa3",
-    100: "flashinfer",
-    120: "flashinfer",
-}
-
-
-def resolve_fast_ar_attention_backend(*, gpu_id: int) -> str:
-    if current_platform.is_npu():
-        # Ascend NPU uses the built-in "ascend" attention backend.
-        return "ascend"
-    else:
-        pass
-
-    sm_version = get_visible_gpu_sm_version(gpu_id)
-    if sm_version is None:
-        raise RuntimeError(
-            "FishAudio S2-Pro cannot validate Fast-AR attention because "
-            f"CUDA compute capability for gpu_id={gpu_id} could not be detected."
-        )
-    else:
-        pass
-
-    backend = _VALIDATED_AUTO_ATTENTION_BACKENDS.get(sm_version)
-    if backend is None:
-        raise RuntimeError(
-            f"FishAudio S2-Pro Fast-AR does not support SM{sm_version}; "
-            "supported architectures are SM89, SM90, SM100, and SM120. "
-            "A Slow-AR attention_backend override cannot bypass this requirement."
-        )
-    else:
-        pass
-
-    if backend == "flashinfer" and not is_flashinfer_available():
-        raise RuntimeError(
-            f"FishAudio S2-Pro Fast-AR requires FlashInfer on SM{sm_version}, but "
-            "FlashInfer is unavailable. Install and enable FlashInfer and ensure "
-            "SGLANG_IS_FLASHINFER_AVAILABLE is not false; a Slow-AR "
-            "attention_backend override cannot bypass this requirement."
-        )
-    else:
-        pass
-    return backend
 
 
 class FishS2ProEngineBuilder(TtsEngineBuilder[request_builders.S2ProSGLangRequestData]):

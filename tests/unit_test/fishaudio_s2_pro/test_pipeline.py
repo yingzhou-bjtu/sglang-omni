@@ -82,7 +82,7 @@ def cuda_platform_for_engine_builder_tests(
     monkeypatch.setattr(
         fish_engine,
         "current_platform",
-        SimpleNamespace(is_npu=lambda: False),
+        SimpleNamespace(is_npu=lambda: False, is_musa=lambda: False),
     )
 
 
@@ -1565,28 +1565,26 @@ def test_fast_ar_fa3_selection_follows_compute_capability(
     capability: tuple[int, int],
     expected: bool,
 ) -> None:
-    from sglang_omni.models.fishaudio_s2_pro.fish_speech.models.text2semantic import (
-        audio_decoder,
-    )
+    from sglang_omni.models.fishaudio_s2_pro import fast_ar_attention
 
-    audio_decoder.fast_ar_uses_fa3.cache_clear()
+    fast_ar_attention.resolve_fast_ar_attention_backend.cache_clear()
     monkeypatch.setattr(torch.cuda, "get_device_capability", lambda _index: capability)
 
-    assert audio_decoder.fast_ar_uses_fa3(0) is expected
+    assert (
+        fast_ar_attention.resolve_fast_ar_attention_backend(gpu_id=0) == "fa3"
+    ) is expected
 
 
 def test_fast_ar_rejects_unsupported_capability(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from sglang_omni.models.fishaudio_s2_pro.fish_speech.models.text2semantic import (
-        audio_decoder,
-    )
+    from sglang_omni.models.fishaudio_s2_pro import fast_ar_attention
 
-    audio_decoder.fast_ar_uses_fa3.cache_clear()
+    fast_ar_attention.resolve_fast_ar_attention_backend.cache_clear()
     monkeypatch.setattr(torch.cuda, "get_device_capability", lambda _index: (8, 0))
 
     with pytest.raises(RuntimeError, match="Fast-AR does not support SM80"):
-        audio_decoder.fast_ar_uses_fa3(0)
+        fast_ar_attention.resolve_fast_ar_attention_backend(gpu_id=0)
 
 
 def test_flashinfer_fast_ar_updates_kv_cache(
