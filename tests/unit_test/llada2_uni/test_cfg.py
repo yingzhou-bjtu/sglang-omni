@@ -9,6 +9,10 @@ from unittest.mock import create_autospec
 
 import pytest
 import torch
+
+pytest.importorskip("flashinfer.prefill")
+pytest.importorskip("flashinfer.cascade")
+
 from flashinfer.prefill import (
     BatchPrefillWithPagedKVCacheWrapper,
     BatchPrefillWithRaggedKVCacheWrapper,

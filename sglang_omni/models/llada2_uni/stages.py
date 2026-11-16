@@ -18,7 +18,6 @@ from sglang_omni.models.llada2_uni.bootstrap import (
     create_dllm_thinker_scheduler,
     register_llada2_uni_cfg,
 )
-from sglang_omni.models.llada2_uni.cfg_attention_backend import CFG_ATTENTION_BACKEND
 from sglang_omni.models.llada2_uni.components.common import load_llada2_tokenizer
 from sglang_omni.models.llada2_uni.components.decoder_runtime import (
     initialize_decoder_runtime,
@@ -147,14 +146,15 @@ def create_sglang_dllm_thinker_executor_from_config(
     concrete_device = resolve_concrete_device(device, gpu_id)
     resolved_gpu_id = concrete_device.index or 0
 
+    attention_backend = "triton" if concrete_device.type == "musa" else "flashinfer"
     overrides: dict[str, object] = {
-        "attention_backend": "flashinfer",
+        "attention_backend": attention_backend,
         "disable_cuda_graph": True,
         "sampling_backend": "pytorch",
     }
     if dllm_algorithm == "LowConfidenceCFG":
         register_llada2_uni_cfg()
-        overrides["attention_backend"] = CFG_ATTENTION_BACKEND
+        overrides["attention_backend"] = "llada2_uni_cfg_flashinfer"
         overrides["dllm_fdfo"] = False
     else:
         pass

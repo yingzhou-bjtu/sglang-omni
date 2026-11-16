@@ -14,10 +14,6 @@ from sglang.srt.model_executor.cuda_graph_config import Backend as CudaGraphBack
 from sglang.srt.server_args import ServerArgs
 from sglang.srt.utils.hf_transformers_utils import get_tokenizer
 
-from sglang_omni.models.llada2_uni.cfg_attention_backend import (
-    CFG_ATTENTION_BACKEND,
-    register_llada2_cfg_flashinfer_backend,
-)
 from sglang_omni.models.llada2_uni.low_confidence_cfg import LowConfidenceCFG
 from sglang_omni.models.llada2_uni.request_builders import (
     make_dllm_thinker_scheduler_adapters,
@@ -32,6 +28,10 @@ def register_llada2_uni_cfg() -> None:
 
     The text-only LowConfidence variant does not need this registration.
     """
+    from sglang_omni.models.llada2_uni.cfg_attention_backend import (
+        register_llada2_cfg_flashinfer_backend,
+    )
+
     algo_name_to_cls["LowConfidenceCFG"] = LowConfidenceCFG
     register_llada2_cfg_flashinfer_backend()
 
@@ -42,6 +42,10 @@ def validate_cfg(server_args: ServerArgs) -> None:
         return
     else:
         pass
+    from sglang_omni.models.llada2_uni.cfg_attention_backend import (
+        CFG_ATTENTION_BACKEND,
+    )
+
     register_llada2_uni_cfg()
     if any(backend != CFG_ATTENTION_BACKEND for backend in attention_backends_of(cfg)):
         raise ValueError("LowConfidenceCFG requires llada2_uni_cfg_flashinfer")
