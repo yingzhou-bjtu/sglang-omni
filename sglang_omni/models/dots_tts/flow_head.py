@@ -13,7 +13,6 @@ from einops import rearrange
 from torch import nn
 
 from sglang_omni.models.dots_tts.compat import import_dots_tts
-from sglang_omni.utils.device import supports_device_streams
 
 if TYPE_CHECKING:
     from dots_tts.modules.backbone.dit_inference import DiTSolver, DiTSolverState
@@ -118,9 +117,9 @@ class DotsTTSFlowHead(nn.Module):
         self.tail: DotsTtsAcousticTail | None = None
         self.batched_nfe: int | None = None
         self.eos_pinned: torch.Tensor | None = None
-        self.eos_event: torch.Event | None = None
+        self.eos_event: torch.cuda.Event | None = None
         self.batched_eos_pinned: torch.Tensor | None = None
-        self.batched_eos_event: torch.Event | None = None
+        self.batched_eos_event: torch.cuda.Event | None = None
         self.batched_eos_host: list[bool] | None = None
         self.batched_eos_pending: int = 0
 
@@ -229,7 +228,7 @@ class DotsTTSFlowHead(nn.Module):
             optimize=optimize,
         )
         self.batched_nfe = int(nfe)
-        self.prepare_batched_eos_staging(int(num_slots), parameter.device)
+        self.prepare_batched_eos_staging(int(num_slots), parameter)
 
     def validate_request(
         self,
@@ -574,10 +573,10 @@ class DotsTTSFlowHead(nn.Module):
                 .gt(float(eos_threshold))
                 .reshape(())
             )
-            if supports_device_streams(eos_hit.device):
+            if eos_hit.is_cuda:
                 if self.eos_pinned is None:
                     self.eos_pinned = torch.zeros((), dtype=torch.bool, pin_memory=True)
-                    self.eos_event = torch.Event(device=eos_hit.device)
+                    self.eos_event = torch.cuda.Event()
                 else:
                     pass
                 self.eos_pinned.copy_(eos_hit, non_blocking=True)
@@ -629,7 +628,7 @@ class DotsTTSFlowHead(nn.Module):
         )
         if eos_hit is None:
             finished = False
-        elif supports_device_streams(eos_hit.device):
+        elif eos_hit.is_cuda:
             self.eos_event.synchronize()
             finished = bool(self.eos_pinned.item())
         else:
@@ -752,20 +751,20 @@ class DotsTTSFlowHead(nn.Module):
         self.batched_eos_pending = 0
         return flags
 
-    def prepare_batched_eos_staging(self, capacity: int, device: torch.device) -> None:
+    def prepare_batched_eos_staging(self, capacity: int, tensor: torch.Tensor) -> None:
         """Reset pending EOS staging and size the pinned buffer at init."""
         self.batched_eos_pending = 0
         self.batched_eos_host = None
-        if not supports_device_streams(device) or capacity <= 0:
+        if not tensor.is_cuda or capacity <= 0:
             self.batched_eos_pinned = None
             self.batched_eos_event = None
             return
         else:
             pass
-        self.ensure_batched_eos_capacity(capacity, device)
+        self.ensure_batched_eos_capacity(capacity, tensor)
 
-    def ensure_batched_eos_capacity(self, capacity: int, device: torch.device) -> None:
-        if not supports_device_streams(device) or capacity <= 0:
+    def ensure_batched_eos_capacity(self, capacity: int, tensor: torch.Tensor) -> None:
+        if not tensor.is_cuda or capacity <= 0:
             return
         else:
             pass
@@ -776,7 +775,7 @@ class DotsTTSFlowHead(nn.Module):
             self.batched_eos_pinned = torch.zeros(
                 capacity, dtype=torch.bool, pin_memory=True
             )
-            self.batched_eos_event = torch.Event(device=device)
+            self.batched_eos_event = torch.cuda.Event()
         else:
             pass
 
@@ -794,8 +793,8 @@ class DotsTTSFlowHead(nn.Module):
             return
         else:
             pass
-        if supports_device_streams(eos_hits.device):
-            self.ensure_batched_eos_capacity(n, eos_hits.device)
+        if eos_hits.is_cuda:
+            self.ensure_batched_eos_capacity(n, eos_hits)
             assert self.batched_eos_pinned is not None
             assert self.batched_eos_event is not None
             self.batched_eos_pinned[:n].copy_(

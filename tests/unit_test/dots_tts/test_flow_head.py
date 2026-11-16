@@ -519,9 +519,9 @@ def test_prepare_batched_eos_staging_uses_device_runtime(monkeypatch) -> None:
     pinned = torch.zeros(4, dtype=torch.bool)
     event = object()
     monkeypatch.setattr(torch, "zeros", lambda *_args, **_kwargs: pinned)
-    monkeypatch.setattr(torch, "Event", lambda **_kwargs: event)
+    monkeypatch.setattr(torch.cuda, "Event", lambda: event)
 
-    flow.prepare_batched_eos_staging(4, SimpleNamespace(type="musa"))
+    flow.prepare_batched_eos_staging(4, SimpleNamespace(is_cuda=True))
 
     assert flow.batched_eos_pending == 0
     assert flow.batched_eos_host is None
