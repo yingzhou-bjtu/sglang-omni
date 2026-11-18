@@ -23,6 +23,27 @@ from sglang_omni.scheduling.dllm_scheduler import DllmScheduler
 from sglang_omni.vendor.sglang.server_args import override_server_args
 
 
+def has_llada2_flashinfer_attention() -> bool:
+    """Return whether FlashInfer exposes the dense attention surface used by LLaDA2."""
+    try:
+        import flashinfer
+        import flashinfer.cascade
+        import flashinfer.prefill
+    except ImportError:
+        return False
+    root_surface = (
+        hasattr(flashinfer, "BatchDecodeWithPagedKVCacheWrapper")
+        and hasattr(flashinfer, "BatchPrefillWithPagedKVCacheWrapper")
+        and hasattr(flashinfer, "BatchPrefillWithRaggedKVCacheWrapper")
+        and hasattr(flashinfer, "fast_decode_plan")
+    )
+    return (
+        root_surface
+        and hasattr(flashinfer.cascade, "merge_state")
+        and hasattr(flashinfer.prefill, "BatchPrefillWithRaggedKVCacheWrapper")
+    )
+
+
 def register_llada2_uni_cfg() -> None:
     """Call before build_server_args for the omni LowConfidenceCFG variant.
 

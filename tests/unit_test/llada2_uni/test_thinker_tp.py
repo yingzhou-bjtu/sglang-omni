@@ -31,6 +31,10 @@ def test_thinker_factory_preserves_tp_and_cfg_configuration(
         "resolve_concrete_device",
         lambda *_args, **_kwargs: SimpleNamespace(type="cuda", index=tp_rank + 2),
     )
+    if algorithm == "LowConfidenceCFG":
+        monkeypatch.setattr(stages, "has_llada2_flashinfer_attention", lambda: True)
+    else:
+        pass
 
     scheduler = stages.create_sglang_dllm_thinker_executor_from_config(
         "model",
@@ -68,8 +72,14 @@ def test_thinker_factory_preserves_tp_and_cfg_configuration(
         assert settings["attention_backend"] == "flashinfer"
 
 
-def test_thinker_factory_uses_triton_for_default_musa_attention(
+@pytest.mark.parametrize(
+    "has_dense_flashinfer,expected_backend",
+    [(False, "triton"), (True, "flashinfer")],
+)
+def test_thinker_factory_selects_musa_attention_by_capability(
     monkeypatch: pytest.MonkeyPatch,
+    has_dense_flashinfer: bool,
+    expected_backend: str,
 ) -> None:
     server_args = SimpleNamespace(
         dllm_algorithm="LowConfidence", mem_fraction_static=0.5
@@ -87,6 +97,11 @@ def test_thinker_factory_uses_triton_for_default_musa_attention(
     monkeypatch.setattr(stages, "override_server_args", override_args)
     monkeypatch.setattr(stages, "pin_resolved_device_type", lambda *_args: None)
     monkeypatch.setattr(stages, "resolved_view", lambda args: args)
+    monkeypatch.setattr(
+        stages,
+        "has_llada2_flashinfer_attention",
+        lambda: has_dense_flashinfer,
+    )
 
     stages.create_sglang_dllm_thinker_executor_from_config(
         "model",
@@ -98,5 +113,28 @@ def test_thinker_factory_uses_triton_for_default_musa_attention(
         dllm_algorithm="LowConfidence",
     )
 
-    assert build_args.call_args.kwargs["attention_backend"] == "triton"
+    assert build_args.call_args.kwargs["attention_backend"] == expected_backend
     override_args.assert_not_called()
+
+
+def test_thinker_factory_rejects_cfg_without_dense_flashinfer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        stages,
+        "has_llada2_flashinfer_attention",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        stages,
+        "resolve_concrete_device",
+        lambda *_args, **_kwargs: SimpleNamespace(type="musa", index=0),
+    )
+
+    with pytest.raises(RuntimeError, match="requires FlashInfer dense attention"):
+        stages.create_sglang_dllm_thinker_executor_from_config(
+            "model",
+            device="musa",
+            gpu_id=0,
+            dllm_algorithm="LowConfidenceCFG",
+        )

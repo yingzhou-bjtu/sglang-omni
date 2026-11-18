@@ -16,6 +16,7 @@ from typing_extensions import NotRequired, TypedDict
 
 from sglang_omni.models.llada2_uni.bootstrap import (
     create_dllm_thinker_scheduler,
+    has_llada2_flashinfer_attention,
     register_llada2_uni_cfg,
 )
 from sglang_omni.models.llada2_uni.components.common import load_llada2_tokenizer
@@ -146,13 +147,24 @@ def create_sglang_dllm_thinker_executor_from_config(
     concrete_device = resolve_concrete_device(device, gpu_id)
     resolved_gpu_id = concrete_device.index or 0
 
-    attention_backend = "triton" if concrete_device.type == "musa" else "flashinfer"
+    attention_backend = (
+        "triton"
+        if concrete_device.type == "musa" and not has_llada2_flashinfer_attention()
+        else "flashinfer"
+    )
     overrides: dict[str, object] = {
         "attention_backend": attention_backend,
         "disable_cuda_graph": True,
         "sampling_backend": "pytorch",
     }
     if dllm_algorithm == "LowConfidenceCFG":
+        if not has_llada2_flashinfer_attention():
+            raise RuntimeError(
+                "LowConfidenceCFG requires FlashInfer dense attention "
+                "(flashinfer.prefill and flashinfer.cascade)"
+            )
+        else:
+            pass
         register_llada2_uni_cfg()
         overrides["attention_backend"] = "llada2_uni_cfg_flashinfer"
         overrides["dllm_fdfo"] = False
