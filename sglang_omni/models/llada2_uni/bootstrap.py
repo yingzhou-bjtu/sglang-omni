@@ -14,10 +14,6 @@ from sglang.srt.model_executor.cuda_graph_config import Backend as CudaGraphBack
 from sglang.srt.server_args import ServerArgs
 from sglang.srt.utils.hf_transformers_utils import get_tokenizer
 
-from sglang_omni.models.llada2_uni.cfg_attention_backend import (
-    CFG_ATTENTION_BACKEND,
-    register_llada2_cfg_flashinfer_backend,
-)
 from sglang_omni.models.llada2_uni.low_confidence_cfg import LowConfidenceCFG
 from sglang_omni.models.llada2_uni.request_builders import (
     make_dllm_thinker_scheduler_adapters,
@@ -27,11 +23,36 @@ from sglang_omni.scheduling.dllm_scheduler import DllmScheduler
 from sglang_omni.vendor.sglang.server_args import override_server_args
 
 
+def has_llada2_flashinfer_attention() -> bool:
+    """Return whether FlashInfer exposes the dense attention surface used by LLaDA2."""
+    try:
+        import flashinfer
+        import flashinfer.cascade
+        import flashinfer.prefill
+    except ImportError:
+        return False
+    root_surface = (
+        hasattr(flashinfer, "BatchDecodeWithPagedKVCacheWrapper")
+        and hasattr(flashinfer, "BatchPrefillWithPagedKVCacheWrapper")
+        and hasattr(flashinfer, "BatchPrefillWithRaggedKVCacheWrapper")
+        and hasattr(flashinfer, "fast_decode_plan")
+    )
+    return (
+        root_surface
+        and hasattr(flashinfer.cascade, "merge_state")
+        and hasattr(flashinfer.prefill, "BatchPrefillWithRaggedKVCacheWrapper")
+    )
+
+
 def register_llada2_uni_cfg() -> None:
     """Call before build_server_args for the omni LowConfidenceCFG variant.
 
     The text-only LowConfidence variant does not need this registration.
     """
+    from sglang_omni.models.llada2_uni.cfg_attention_backend import (
+        register_llada2_cfg_flashinfer_backend,
+    )
+
     algo_name_to_cls["LowConfidenceCFG"] = LowConfidenceCFG
     register_llada2_cfg_flashinfer_backend()
 
@@ -42,6 +63,10 @@ def validate_cfg(server_args: ServerArgs) -> None:
         return
     else:
         pass
+    from sglang_omni.models.llada2_uni.cfg_attention_backend import (
+        CFG_ATTENTION_BACKEND,
+    )
+
     register_llada2_uni_cfg()
     if any(backend != CFG_ATTENTION_BACKEND for backend in attention_backends_of(cfg)):
         raise ValueError("LowConfidenceCFG requires llada2_uni_cfg_flashinfer")
